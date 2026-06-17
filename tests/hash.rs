@@ -137,3 +137,99 @@ fn clone_snapshots_state() {
         hex::encode(run(&br_sha256_vtable, br_sha256_SIZE, b"abcdef"))
     );
 }
+
+// ---- GHASH known-answer tests (subset of BearSSL KAT_GHASH) -----------------
+
+fn ghash_kat(h: &str, a: &str, c: &str, refv: &str) {
+    use bearssl::inner::br_enc32be;
+    let h = hex::decode(h).unwrap();
+    let a = hex::decode(a).unwrap();
+    let c = hex::decode(c).unwrap();
+    let mut y = [0u8; 16];
+    br_ghash_ctmul(&mut y, &h, &a);
+    br_ghash_ctmul(&mut y, &h, &c);
+    let mut p = [0u8; 16];
+    br_enc32be(&mut p[4..], (a.len() as u32) << 3);
+    br_enc32be(&mut p[12..], (c.len() as u32) << 3);
+    br_ghash_ctmul(&mut y, &h, &p);
+    assert_eq!(hex::encode(y), refv);
+}
+
+#[test]
+fn ghash_ctmul_kat() {
+    ghash_kat(
+        "66e94bd4ef8a2c3b884cfa59ca342b2e",
+        "",
+        "",
+        "00000000000000000000000000000000",
+    );
+    ghash_kat(
+        "66e94bd4ef8a2c3b884cfa59ca342b2e",
+        "",
+        "0388dace60b6a392f328c2b971b2fe78",
+        "f38cbb1ad69223dcc3457ae5b6b0f885",
+    );
+    ghash_kat(
+        "b83b533708bf535d0aa6e52980d53b78",
+        "",
+        "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985",
+        "7f1b32b81b820d02614f8895ac1d4eac",
+    );
+    ghash_kat(
+        "b83b533708bf535d0aa6e52980d53b78",
+        "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+        "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
+        "698e57f70e6ecc7fd9463b7260a9ae5f",
+    );
+    ghash_kat(
+        "466923ec9ae682214f2c082badb39249",
+        "",
+        "3980ca0b3c00e841eb06fac4872a2757859e1ceaa6efd984628593b40ca1e19c7d773d00c144c525ac619d18c84a3f4718e2448b2fe324d9ccda2710acade256",
+        "51110d40f6c8fff0eb1ae33445a889f0",
+    );
+}
+
+#[test]
+fn md5sha1_kat() {
+    // MD5+SHA-1 over "abc" = MD5("abc") || SHA1("abc").
+    let mut cc = (br_md5sha1_vtable.new)();
+    cc.update(b"abc");
+    let mut out = [0u8; br_md5sha1_SIZE];
+    cc.out(&mut out);
+    assert_eq!(
+        hex::encode(out),
+        "900150983cd24fb0d6963f7d28e17f72a9993e364706816aba3e25717850c26c9cd0d89d"
+    );
+}
+
+#[test]
+fn multihash_parallel() {
+    let mut ctx = br_multihash_context::default();
+    br_multihash_zero(&mut ctx);
+    br_multihash_setimpl(&mut ctx, br_sha256_ID as i32, Some(&br_sha256_vtable));
+    br_multihash_setimpl(&mut ctx, br_sha1_ID as i32, Some(&br_sha1_vtable));
+    br_multihash_init(&mut ctx);
+    br_multihash_update(&mut ctx, b"abc", 3);
+
+    let mut s256 = [0u8; 32];
+    let n = br_multihash_out(&ctx, br_sha256_ID as i32, &mut s256);
+    assert_eq!(n, 32);
+    assert_eq!(
+        hex::encode(s256),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    let mut s1 = [0u8; 20];
+    let n = br_multihash_out(&ctx, br_sha1_ID as i32, &mut s1);
+    assert_eq!(n, 20);
+    assert_eq!(hex::encode(s1), "a9993e364706816aba3e25717850c26c9cd0d89d");
+
+    // out() must not disturb the running computation: more data can follow and
+    // the SHA-256 result must then equal the hash of the concatenation.
+    br_multihash_update(&mut ctx, b"def", 3);
+    let mut s256b = [0u8; 32];
+    br_multihash_out(&ctx, br_sha256_ID as i32, &mut s256b);
+    assert_eq!(
+        hex::encode(s256b),
+        hex::encode(run(&br_sha256_vtable, br_sha256_SIZE, b"abcdef"))
+    );
+}

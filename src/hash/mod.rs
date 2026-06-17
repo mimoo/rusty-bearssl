@@ -40,6 +40,8 @@ pub const fn BR_HASHDESC_LBLEN(ls: u32) -> u32 {
 
 // ---- symbolic identifiers and output sizes (inc/bearssl_hash.h) -------------
 
+pub const br_md5sha1_ID: u32 = 0;
+pub const br_md5sha1_SIZE: usize = 36;
 pub const br_md5_ID: u32 = 1;
 pub const br_md5_SIZE: usize = 16;
 pub const br_sha1_ID: u32 = 2;
@@ -113,10 +115,33 @@ impl Clone for Box<dyn HashState> {
     }
 }
 
+/// GHASH implementation function type (`br_ghash` in inc/bearssl_hash.h):
+/// updates the 16-byte `y` with key `h` over `data` (zero-padded to 16).
+pub type br_ghash = fn(y: &mut [u8], h: &[u8], data: &[u8]);
+
+mod dig_oid;
+mod dig_size;
+mod ghash_ctmul;
 mod md5;
+mod md5sha1;
+mod mgf1;
+mod multihash;
 mod sha1;
 mod sha2big;
 mod sha2small;
+
+pub use dig_oid::br_digest_OID;
+pub use dig_size::{br_digest_size, br_digest_size_by_ID};
+pub use ghash_ctmul::br_ghash_ctmul;
+pub use md5sha1::{
+    br_md5sha1_context, br_md5sha1_init, br_md5sha1_out, br_md5sha1_set_state, br_md5sha1_state,
+    br_md5sha1_update, br_md5sha1_vtable,
+};
+pub use mgf1::br_mgf1_xor;
+pub use multihash::{
+    br_multihash_context, br_multihash_copyimpl, br_multihash_getimpl, br_multihash_init,
+    br_multihash_out, br_multihash_setimpl, br_multihash_update, br_multihash_zero,
+};
 
 pub use md5::{
     br_md5_context, br_md5_init, br_md5_out, br_md5_round, br_md5_set_state, br_md5_state,
