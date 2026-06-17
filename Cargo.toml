@@ -1,0 +1,19 @@
+[package]
+name = "bearssl-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Idiomatic Rust reimplementation of BearSSL, interoperable with the C library"
+license = "MIT"
+
+[lib]
+name = "bearssl"
+path = "src/lib.rs"
+
+[dev-dependencies]
+hex = "0.4"
+
+[features]
+default = []
+# When enabled, builds and links against the upstream C BearSSL for
+# cross-implementation interop testing (see tests/interop).
+ctest = []
