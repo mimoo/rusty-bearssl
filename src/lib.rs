@@ -14,9 +14,13 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::manual_swap)]
+// The int/ port mirrors C casts (e.g. `(zl >> 32) as u64`) that are sometimes
+// width-preserving in Rust; keeping them aids line-by-line review.
+#![allow(clippy::unnecessary_cast)]
 #![allow(dead_code)]
 
 pub mod inner;
 
 pub mod codec;
 pub mod hash;
+pub mod int;
