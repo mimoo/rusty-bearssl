@@ -30,4 +30,5 @@ pub mod kdf;
 pub mod mac;
 pub mod rand;
 pub mod rsa;
+pub mod ssl;
 pub mod symcipher;
