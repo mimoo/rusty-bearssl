@@ -89,3 +89,59 @@ fn gcm_sequence_numbers_advance() {
         assert_eq!(&payload[poff..poff + plen], &pt[..]);
     }
 }
+
+// ---- ChaCha20-Poly1305 record layer ----------------------------------------
+
+use bearssl::symcipher::{br_chacha20_ct_run, br_poly1305_ctmul_run};
+
+const CHAPOL_KEY: [u8; 32] = [
+    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
+    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
+];
+const CHAPOL_IV: [u8; 12] = [0x07, 0x00, 0x00, 0x00, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47];
+
+#[test]
+fn chapol_record_roundtrip() {
+    let pt = b"ChaCha20-Poly1305 TLS record payload, hello!";
+    let len = pt.len();
+    let po = 5; // record header only (no explicit nonce)
+    let mut buf = vec![0u8; po + len + 16];
+    buf[po..po + len].copy_from_slice(pt);
+
+    let mut out = br_sslrec_out_chapol_init(
+        br_chacha20_ct_run,
+        br_poly1305_ctmul_run,
+        &CHAPOL_KEY,
+        &CHAPOL_IV,
+    );
+    let (off, total) = chapol_encrypt(&mut out, 23, 0x0303, &mut buf, po, len);
+    assert_eq!(total, 5 + len + 16);
+    assert_eq!(buf[off], 23);
+    assert_ne!(&buf[po..po + len], &pt[..], "ciphertext differs");
+
+    let mut payload = buf[off + 5..off + total].to_vec();
+    let mut inc = br_sslrec_in_chapol_init(
+        br_chacha20_ct_run,
+        br_poly1305_ctmul_run,
+        &CHAPOL_KEY,
+        &CHAPOL_IV,
+    );
+    assert!(chapol_check_length(&inc, payload.len()));
+    let (poff, plen) = chapol_decrypt(&mut inc, 23, 0x0303, &mut payload).expect("MAC verify");
+    assert_eq!(&payload[poff..poff + plen], &pt[..]);
+}
+
+#[test]
+fn chapol_tamper_rejected() {
+    let pt = b"secret";
+    let len = pt.len();
+    let po = 5;
+    let mut buf = vec![0u8; po + len + 16];
+    buf[po..po + len].copy_from_slice(pt);
+    let mut out = br_sslrec_out_chapol_init(br_chacha20_ct_run, br_poly1305_ctmul_run, &CHAPOL_KEY, &CHAPOL_IV);
+    let (off, total) = chapol_encrypt(&mut out, 23, 0x0303, &mut buf, po, len);
+    let mut payload = buf[off + 5..off + total].to_vec();
+    payload[2] ^= 0x01;
+    let mut inc = br_sslrec_in_chapol_init(br_chacha20_ct_run, br_poly1305_ctmul_run, &CHAPOL_KEY, &CHAPOL_IV);
+    assert!(chapol_decrypt(&mut inc, 23, 0x0303, &mut payload).is_none());
+}

@@ -24,12 +24,17 @@ mod prf;
 mod prf_md5sha1;
 mod prf_sha256;
 mod prf_sha384;
+mod ssl_rec_chapol;
 mod ssl_rec_gcm;
 
 pub use prf::br_tls_phash;
 pub use prf_md5sha1::br_tls10_prf;
 pub use prf_sha256::br_tls12_sha256_prf;
 pub use prf_sha384::br_tls12_sha384_prf;
+pub use ssl_rec_chapol::{
+    br_poly1305_run, br_sslrec_chapol_context, br_sslrec_in_chapol_init, br_sslrec_out_chapol_init,
+    chapol_check_length, chapol_decrypt, chapol_encrypt, chapol_max_plaintext,
+};
 pub use ssl_rec_gcm::{
     br_sslrec_gcm_context, br_sslrec_in_gcm_init, br_sslrec_out_gcm_init, gcm_check_length,
     gcm_decrypt, gcm_encrypt, gcm_max_plaintext,
