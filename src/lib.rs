@@ -21,10 +21,13 @@
 
 pub mod inner;
 
+pub mod aead;
 pub mod codec;
+pub mod ec;
 pub mod hash;
 pub mod int;
 pub mod kdf;
 pub mod mac;
 pub mod rand;
+pub mod rsa;
 pub mod symcipher;
