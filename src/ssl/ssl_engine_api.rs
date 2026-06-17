@@ -276,6 +276,8 @@ impl br_ssl_engine_context {
     /// see inner.h (`br_ssl_engine_hs_reset`)
     pub(super) fn hs_reset(&mut self, kind: HsKind) {
         self.engine_clearbuf();
+        self.dp = 0;
+        self.rp = 0;
         self.hsrun = Some(kind);
         // Initialise the T0 VM (dp/rp reset + enter main).
         match kind {

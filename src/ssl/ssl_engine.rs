@@ -290,6 +290,13 @@ pub struct br_ssl_engine_context {
 
     /// Handshake entry/run callbacks (filled by client/server reset).
     pub(super) hsrun: Option<HsKind>,
+
+    // ---- T0 virtual-machine state (`cpu` + stacks) --------------------------
+    pub(super) dp_stack: [u32; 32],
+    pub(super) rp_stack: [u32; 32],
+    pub(super) dp: usize,
+    pub(super) rp: usize,
+    pub(super) ip: usize,
 }
 
 /// Which buffer the handshake input pointer currently refers to.
@@ -462,6 +469,11 @@ impl br_ssl_engine_context {
             cert_pos: 0,
             close_received: false,
             hsrun: None,
+            dp_stack: [0; 32],
+            rp_stack: [0; 32],
+            dp: 0,
+            rp: 0,
+            ip: 0,
         }
     }
 }

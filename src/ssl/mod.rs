@@ -26,12 +26,14 @@ mod prf_md5sha1;
 mod prf_sha256;
 mod prf_sha384;
 mod server_codeblock;
+mod ssl_client;
 mod ssl_engine;
 mod ssl_hs_client;
 mod ssl_hs_server;
 mod ssl_rec_chapol;
 mod ssl_rec_gcm;
 
+pub use ssl_client::{br_ssl_client_context, SUITES_SUPPORTED};
 pub use ssl_engine::{
     br_ssl_choose_hash, br_ssl_engine_context, BR_ERR_BAD_HANDSHAKE, BR_ERR_BAD_MAC, BR_ERR_OK,
     BR_SSL_APPLICATION_DATA, BR_SSL_CLOSED, BR_SSL_RECVAPP, BR_SSL_RECVREC, BR_SSL_SENDAPP,
