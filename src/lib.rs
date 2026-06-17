@@ -32,3 +32,4 @@ pub mod rand;
 pub mod rsa;
 pub mod ssl;
 pub mod symcipher;
+pub mod x509;
