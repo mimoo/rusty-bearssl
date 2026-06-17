@@ -22,3 +22,4 @@ pub mod codec;
 pub mod hash;
 pub mod kdf;
 pub mod mac;
+pub mod symcipher;
