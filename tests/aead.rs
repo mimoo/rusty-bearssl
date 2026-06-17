@@ -87,3 +87,40 @@ fn gcm_long_iv() {
         "3612d2e79e3b0785561be14aaca2fccb",
     );
 }
+
+// ---- AES-CCM (RFC 3610 test vectors) ----------------------------------------
+
+use bearssl::symcipher::br_aes_ct_ctrcbc_vtable;
+
+#[test]
+fn ccm_rfc3610_packet1() {
+    let key = hx("c0c1c2c3c4c5c6c7c8c9cacbcccdcecf");
+    let nonce = hx("00000003020100a0a1a2a3a4a5");
+    let aad = hx("0001020304050607");
+    let plain = hx("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
+    let exp_ct = "588c979a61c663d2f066d0c2c0f989806d5f6b61dac384";
+    let exp_tag = "17e8d12cfdf926e0";
+
+    let bctx = (br_aes_ct_ctrcbc_vtable.init)(&key);
+    let mut ctx = br_ccm_init(bctx);
+    assert!(br_ccm_reset(&mut ctx, &nonce, aad.len() as u64, plain.len() as u64, 8));
+    br_ccm_aad_inject(&mut ctx, &aad);
+    br_ccm_flip(&mut ctx);
+    let mut data = plain.clone();
+    br_ccm_run(&mut ctx, true, &mut data);
+    let mut tag = [0u8; 8];
+    let tl = br_ccm_get_tag(&mut ctx, &mut tag);
+    assert_eq!(tl, 8);
+    assert_eq!(hex::encode(&data), exp_ct, "ccm ciphertext");
+    assert_eq!(hex::encode(tag), exp_tag, "ccm tag");
+
+    // Decrypt + verify.
+    let bctx = (br_aes_ct_ctrcbc_vtable.init)(&key);
+    let mut ctx = br_ccm_init(bctx);
+    br_ccm_reset(&mut ctx, &nonce, aad.len() as u64, data.len() as u64, 8);
+    br_ccm_aad_inject(&mut ctx, &aad);
+    br_ccm_flip(&mut ctx);
+    br_ccm_run(&mut ctx, false, &mut data);
+    assert_eq!(hex::encode(&data), hex::encode(&plain), "ccm decrypt");
+    assert_eq!(br_ccm_check_tag(&mut ctx, &tag), 1, "ccm tag verify");
+}

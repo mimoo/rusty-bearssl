@@ -28,8 +28,13 @@ pub trait Aead {
     fn check_tag_trunc(&mut self, tag: &[u8], len: usize) -> u32;
 }
 
+mod ccm;
 mod gcm;
 
+pub use ccm::{
+    br_ccm_aad_inject, br_ccm_check_tag, br_ccm_context, br_ccm_flip, br_ccm_get_tag, br_ccm_init,
+    br_ccm_reset, br_ccm_run,
+};
 pub use gcm::{
     br_gcm_aad_inject, br_gcm_check_tag, br_gcm_check_tag_trunc, br_gcm_context, br_gcm_flip,
     br_gcm_get_tag, br_gcm_get_tag_trunc, br_gcm_init, br_gcm_reset, br_gcm_run,
