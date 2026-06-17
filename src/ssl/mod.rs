@@ -20,12 +20,23 @@ pub struct br_tls_prf_seed_chunk<'a> {
 /// from `secret`, `label` and the `seed` chunks.
 pub type br_tls_prf_impl = fn(dst: &mut [u8], secret: &[u8], label: &[u8], seed: &[br_tls_prf_seed_chunk]);
 
+mod client_codeblock;
 mod prf;
 mod prf_md5sha1;
 mod prf_sha256;
 mod prf_sha384;
+mod server_codeblock;
+mod ssl_engine;
+mod ssl_hs_client;
+mod ssl_hs_server;
 mod ssl_rec_chapol;
 mod ssl_rec_gcm;
+
+pub use ssl_engine::{
+    br_ssl_choose_hash, br_ssl_engine_context, BR_ERR_BAD_HANDSHAKE, BR_ERR_BAD_MAC, BR_ERR_OK,
+    BR_SSL_APPLICATION_DATA, BR_SSL_CLOSED, BR_SSL_RECVAPP, BR_SSL_RECVREC, BR_SSL_SENDAPP,
+    BR_SSL_SENDREC, BR_TLS10, BR_TLS11, BR_TLS12,
+};
 
 pub use prf::br_tls_phash;
 pub use prf_md5sha1::br_tls10_prf;
