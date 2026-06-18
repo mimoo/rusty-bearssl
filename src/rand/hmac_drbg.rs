@@ -4,7 +4,7 @@
 
 //! HMAC_DRBG (`src/rand/hmac_drbg.c`), the HMAC-based DRBG from NIST SP800-90A.
 
-use super::{br_prng_class, PrngState};
+use super::{br_prng_class, PrngParams, PrngState};
 use crate::hash::{br_digest_size, br_hash_class};
 use crate::mac::{
     br_hmac_context, br_hmac_key_context, br_hmac_key_init, br_hmac_out,
@@ -144,5 +144,8 @@ impl PrngState for br_hmac_drbg_context {
 /// see bearssl.h
 pub static br_hmac_drbg_vtable: br_prng_class = br_prng_class {
     context_size: std::mem::size_of::<br_hmac_drbg_context>(),
-    init: |params, seed| Box::new(br_hmac_drbg_context::new(params, seed)),
+    init: |params, seed| match params {
+        PrngParams::Hash(h) => Box::new(br_hmac_drbg_context::new(h, seed)),
+        PrngParams::BlockCtr(_) => panic!("HMAC_DRBG requires a hash-function parameter"),
+    },
 };
