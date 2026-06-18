@@ -160,10 +160,20 @@ pub(super) const OFF_CLI_SERVER_CURVE: usize = 3624; // i32
 pub(super) const OFF_CLI_AUTH_TYPE: usize = 3640; // u8
 pub(super) const OFF_CLI_HASH_ID: usize = 3641; // u8
 
+// Server-context-specific addressable fields (offsets within
+// br_ssl_server_context). These reproduce offsetof() values from the 64-bit
+// build, used by the server T0 code via `addr-ctx:`.
+pub(super) const OFF_SRV_CLIENT_MAX_VERSION: usize = 3616; // u16
+pub(super) const OFF_SRV_CLIENT_SUITES: usize = 3632; // br_suite_translated[BR_MAX_CIPHER_SUITES] (u16[2] each)
+pub(super) const OFF_SRV_CLIENT_SUITES_NUM: usize = 3824; // u8
+pub(super) const OFF_SRV_HASHES: usize = 3828; // u32
+pub(super) const OFF_SRV_CURVES: usize = 3832; // u32
+pub(super) const OFF_SRV_SIGN_HASH_ID: usize = 3848; // u16
+
 /// Size of the flat memory buffer: enough to cover every addressable field.
-/// We size it to hold the client context fields too (the T0 client code uses
-/// `br_ssl_client_context` offsets, which extend past the engine struct).
-pub(super) const MEM_LEN: usize = 3720;
+/// Sized to cover both the client- and server-context addressable fields
+/// (the server context, `sizeof(br_ssl_server_context) == 4128`, is larger).
+pub(super) const MEM_LEN: usize = 4128;
 
 pub const BR_SSL_PAD_LEN: usize = 512;
 
@@ -309,6 +319,22 @@ pub struct br_ssl_engine_context {
     /// Handshake entry/run callbacks (filled by client/server reset).
     pub(super) hsrun: Option<HsKind>,
 
+    // ---- server-specific fields (br_ssl_server_context) ---------------------
+    // Held as Rust fields because only named helpers touch them (they are not
+    // addressed by offset from the T0 code, unlike the OFF_SRV_* fields which
+    // live in mem[]).
+    /// Transient ECDHE private key + its length (`ecdhe_key`/`ecdhe_key_len`).
+    pub(super) ecdhe_key: [u8; 70],
+    pub(super) ecdhe_key_len: usize,
+    /// CertificateVerify hash buffer / length / id (`hash_CV*`).
+    pub(super) hash_cv: [u8; 64],
+    pub(super) hash_cv_len: usize,
+    pub(super) hash_cv_id: i32,
+    /// Server policy (certificate chain + key operations).
+    pub(super) policy: Option<Box<dyn ServerPolicy>>,
+    /// Session cache (None = no cache configured).
+    pub(super) cache: Option<Box<dyn SslSessionCache>>,
+
     // ---- T0 virtual-machine state (`cpu` + stacks) --------------------------
     pub(super) dp_stack: [u32; 32],
     pub(super) rp_stack: [u32; 32],
@@ -329,6 +355,48 @@ pub(super) enum HBuf {
 pub(super) enum HsKind {
     Client,
     Server,
+}
+
+/// Inputs passed to a server policy's `choose` (extracted from the engine so
+/// the policy needs no borrow of the engine itself).
+pub struct ServerChooseCtx<'a> {
+    /// Negotiated session version (`eng.session.version`).
+    pub version: u16,
+    /// Translated client cipher suites (`client_suites`): `(suite_id, flags)`.
+    pub client_suites: &'a [(u16, u16)],
+    /// Supported-hash bitfield from the ClientHello (`hashes`).
+    pub hashes: u32,
+}
+
+/// Output of a server policy's `choose` (`br_ssl_server_choices`).
+pub struct ServerChoices {
+    pub cipher_suite: u16,
+    pub algo_id: u32,
+    /// Certificate chain (DER blobs) to send.
+    pub chain: Vec<Vec<u8>>,
+}
+
+/// Server policy abstraction (`br_ssl_server_policy_class`): chooses the cipher
+/// suite + chain, and performs the private-key operations.
+pub trait ServerPolicy {
+    /// `choose`: pick a cipher suite and chain. Returns `None` if no suite is
+    /// acceptable.
+    fn choose(&self, ctx: &ServerChooseCtx) -> Option<ServerChoices>;
+    /// `do_keyx`: perform the key-exchange private operation in place on `data`
+    /// (RSA decrypt, or static-ECDH multiply). Returns 1 on success, updates the
+    /// active length through `len`.
+    fn do_keyx(&self, data: &mut [u8], len: &mut usize) -> u32;
+    /// `do_sign`: sign the prepared `data[..hv_len]` in place (room `len`).
+    /// Returns the signature length, or 0 on error.
+    fn do_sign(&self, algo_id: u32, data: &mut [u8], hv_len: usize, len: usize) -> usize;
+}
+
+/// Session cache abstraction (`br_ssl_session_cache_class`). Optional.
+pub trait SslSessionCache {
+    /// `load`: try to resume; returns true if the session was found.
+    fn load(&self, eng: &mut br_ssl_engine_context) -> bool;
+    /// `save`: store the current session.
+    fn save(&self, eng: &mut br_ssl_engine_context);
 }
 
 impl br_ssl_engine_context {
@@ -496,6 +564,13 @@ impl br_ssl_engine_context {
             cert_pos: 0,
             close_received: false,
             hsrun: None,
+            ecdhe_key: [0u8; 70],
+            ecdhe_key_len: 0,
+            hash_cv: [0u8; 64],
+            hash_cv_len: 0,
+            hash_cv_id: 0,
+            policy: None,
+            cache: None,
             dp_stack: [0; 32],
             rp_stack: [0; 32],
             dp: 0,

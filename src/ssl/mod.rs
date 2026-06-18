@@ -31,6 +31,7 @@ mod ssl_engine;
 mod ssl_hs_client;
 mod ssl_hs_server;
 mod ssl_io;
+mod ssl_server;
 mod ssl_rec_cbc;
 mod ssl_rec_ccm;
 mod ssl_rec_chapol;
@@ -44,6 +45,10 @@ pub use ssl_engine::{
 };
 
 pub use ssl_io::{br_sslio_context, LowRead, LowResult, LowWrite};
+pub use ssl_engine::{ServerChoices, ServerChooseCtx, ServerPolicy, SslSessionCache};
+pub use ssl_server::{
+    br_ssl_server_context, RsaPrivateKeyParts, BR_KEYTYPE_EC, BR_KEYTYPE_RSA,
+};
 pub use ssl_rec_cbc::{
     br_sslrec_in_cbc_context, br_sslrec_in_cbc_init, br_sslrec_out_cbc_context,
     br_sslrec_out_cbc_init, cbc_check_length, cbc_decrypt, cbc_encrypt, cbc_max_plaintext,
