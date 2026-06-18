@@ -352,6 +352,12 @@ impl br_ssl_server_context {
         cc
     }
 
+    /// see bearssl_ssl.h (`br_ssl_server_set_cache`). Installs a session cache
+    /// (e.g. [`crate::ssl::br_ssl_session_cache_lru`]) for resumption.
+    pub fn set_cache(&mut self, cache: Box<dyn SslSessionCache>) {
+        self.eng.cache = Some(cache);
+    }
+
     /// see bearssl_ssl.h (`br_ssl_server_reset`).
     pub fn reset(&mut self) -> bool {
         self.eng.set_buffer_default();

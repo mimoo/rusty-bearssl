@@ -507,7 +507,7 @@ pub(crate) fn br_ssl_hs_server_run(eng: &mut br_ssl_engine_context) {
                 }
                 62 => {
                     // save-session
-                    if let Some(cache) = eng.cache.take() {
+                    if let Some(mut cache) = eng.cache.take() {
                         cache.save(eng);
                         eng.cache = Some(cache);
                     }
@@ -875,7 +875,7 @@ fn check_resume(eng: &mut br_ssl_engine_context) -> bool {
     if eng.get8(OFF_SESSION_ID_LEN) != 32 {
         return false;
     }
-    if let Some(cache) = eng.cache.take() {
+    if let Some(mut cache) = eng.cache.take() {
         let r = cache.load(eng);
         eng.cache = Some(cache);
         r

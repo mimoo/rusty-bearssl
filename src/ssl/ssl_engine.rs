@@ -392,11 +392,15 @@ pub trait ServerPolicy {
 }
 
 /// Session cache abstraction (`br_ssl_session_cache_class`). Optional.
+///
+/// Both methods take `&mut self`: loading promotes the entry to the LRU head
+/// and saving inserts/evicts, so both mutate the cache (matching `ssl_lru.c`).
 pub trait SslSessionCache {
-    /// `load`: try to resume; returns true if the session was found.
-    fn load(&self, eng: &mut br_ssl_engine_context) -> bool;
+    /// `load`: try to resume; returns true if the session was found (and fills
+    /// the engine session parameters).
+    fn load(&mut self, eng: &mut br_ssl_engine_context) -> bool;
     /// `save`: store the current session.
-    fn save(&self, eng: &mut br_ssl_engine_context);
+    fn save(&mut self, eng: &mut br_ssl_engine_context);
 }
 
 impl br_ssl_engine_context {

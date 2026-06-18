@@ -4,10 +4,32 @@
 
 //! TLS / SSL (`src/ssl/`).
 //!
-//! This module is being ported incrementally. Currently implemented: the TLS
-//! PRF family (`prf.c`, `prf_md5sha1.c`, `prf_sha256.c`, `prf_sha384.c`). The
-//! record layer, engine, handshake (T0-generated), client and server are
-//! pending.
+//! ## Implemented
+//!
+//! - TLS PRF family (`prf.c`, `prf_md5sha1.c`, `prf_sha256.c`, `prf_sha384.c`).
+//! - Record layers: GCM (`ssl_rec_gcm.c`), ChaCha20-Poly1305
+//!   (`ssl_rec_chapol.c`), CBC (`ssl_rec_cbc.c`, constant-time MAC-then-encrypt
+//!   via `br_hmac_outCT`) and CCM (`ssl_rec_ccm.c`, 8- and 16-byte tags).
+//! - Engine core + record state machine (`ssl_engine.c`) with the GCM / CBC /
+//!   CCM / ChaCha20-Poly1305 key-switch functions.
+//! - TLS 1.2 CLIENT: T0 handshake interpreter (`ssl_hs_client.c`) + full client
+//!   config (`ssl_client.c`/`ssl_client_full.c`). Completes live handshakes
+//!   against `brssl server` for ECDHE_RSA with GCM / CBC / ChaCha20-Poly1305.
+//! - TLS 1.2 SERVER: T0 handshake interpreter (`ssl_hs_server.c`) + config
+//!   (`ssl_server.c`, `ssl_server_full_rsa.c`, `ssl_server_full_ec.c`) and the
+//!   single-certificate policies (`ssl_scert_single_rsa.c`,
+//!   `ssl_scert_single_ec.c`). Completes live handshakes against `brssl client`
+//!   for ECDHE_RSA (GCM / CBC / ChaCha20-Poly1305) and RSA key exchange.
+//! - Blocking I/O wrapper (`ssl_io.c`, [`br_sslio_context`]).
+//! - LRU session cache (`ssl_lru.c`, [`br_ssl_session_cache_lru`]).
+//!
+//! ## Deferred
+//!
+//! - Client-certificate authentication (`ssl_ccert_single_rsa.c` /
+//!   `ssl_ccert_single_ec.c` and the `do-client-sign` handshake path): the
+//!   client interpreter currently fails the handshake if the server requests a
+//!   client certificate (`BR_ERR_INVALID_ALGORITHM`), matching a client with no
+//!   configured client-auth handler.
 
 /// A seed chunk for the TLS PRF (`br_tls_prf_seed_chunk`). The label and seed
 /// are concatenated as the PRF input; chunks may be empty.
@@ -31,6 +53,7 @@ mod ssl_engine;
 mod ssl_hs_client;
 mod ssl_hs_server;
 mod ssl_io;
+mod ssl_lru;
 mod ssl_server;
 mod ssl_rec_cbc;
 mod ssl_rec_ccm;
@@ -46,6 +69,7 @@ pub use ssl_engine::{
 
 pub use ssl_io::{br_sslio_context, LowRead, LowResult, LowWrite};
 pub use ssl_engine::{ServerChoices, ServerChooseCtx, ServerPolicy, SslSessionCache};
+pub use ssl_lru::br_ssl_session_cache_lru;
 pub use ssl_server::{
     br_ssl_server_context, RsaPrivateKeyParts, BR_KEYTYPE_EC, BR_KEYTYPE_RSA,
 };
