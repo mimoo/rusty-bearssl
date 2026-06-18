@@ -264,6 +264,8 @@ impl br_ssl_engine_context {
                 InRec::Clear => Some((0usize, total)),
                 InRec::Gcm(cc) => gcm_decrypt(cc, rt, ver, payload),
                 InRec::Chapol(cc) => chapol_decrypt(cc, rt, ver, payload),
+                InRec::Cbc(cc) => cbc_decrypt(cc, rt, ver, payload),
+                InRec::Ccm(cc) => ccm_decrypt(cc, rt, ver, payload),
             }
         };
         match res {
@@ -362,6 +364,8 @@ impl br_ssl_engine_context {
                 }
                 OutRec::Gcm(cc) => gcm_encrypt(cc, rt, ver, buf, po, xlen),
                 OutRec::Chapol(cc) => chapol_encrypt(cc, rt, ver, buf, po, xlen),
+                OutRec::Cbc(cc) => cbc_encrypt(cc, rt, ver, buf, po, xlen),
+                OutRec::Ccm(cc) => ccm_encrypt(cc, rt, ver, buf, po, xlen),
             }
         };
         self.oxb = hoff;

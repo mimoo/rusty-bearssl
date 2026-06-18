@@ -183,6 +183,57 @@ fn cbc_record_tamper_rejected() {
     );
 }
 
+// ---- CCM record layer (AES-128-CCM, 16-byte and 8-byte tags) ----------------
+
+use bearssl::symcipher::br_aes_ct_ctrcbc_vtable;
+
+fn ccm_roundtrip(tag_len: usize) {
+    let pt = b"AES-CCM TLS 1.2 record payload!!";
+    let len = pt.len();
+    // Layout: [13 hdr+nonce][plaintext][tag].
+    let po = 13;
+    let mut buf = vec![0u8; po + len + 16];
+    buf[po..po + len].copy_from_slice(pt);
+
+    let mut out = br_sslrec_out_ccm_init(&br_aes_ct_ctrcbc_vtable, &KEY, &FIXED_IV, tag_len);
+    let (off, total) = ccm_encrypt(&mut out, 23, 0x0303, &mut buf, po, len);
+    assert_eq!(total, 5 + 8 + len + tag_len);
+    assert_eq!(buf[off], 23);
+    assert_ne!(&buf[po..po + len], &pt[..]);
+
+    let mut payload = buf[off + 5..off + total].to_vec();
+    let mut inc = br_sslrec_in_ccm_init(&br_aes_ct_ctrcbc_vtable, &KEY, &FIXED_IV, tag_len);
+    assert!(ccm_check_length(&inc, payload.len()));
+    let (poff, plen) = ccm_decrypt(&mut inc, 23, 0x0303, &mut payload).expect("CCM tag verify");
+    assert_eq!(plen, len);
+    assert_eq!(&payload[poff..poff + plen], &pt[..]);
+}
+
+#[test]
+fn ccm_record_roundtrip_tag16() {
+    ccm_roundtrip(16);
+}
+
+#[test]
+fn ccm_record_roundtrip_tag8() {
+    ccm_roundtrip(8);
+}
+
+#[test]
+fn ccm_record_tamper_rejected() {
+    let pt = b"secret ccm";
+    let len = pt.len();
+    let po = 13;
+    let mut buf = vec![0u8; po + len + 16];
+    buf[po..po + len].copy_from_slice(pt);
+    let mut out = br_sslrec_out_ccm_init(&br_aes_ct_ctrcbc_vtable, &KEY, &FIXED_IV, 16);
+    let (off, total) = ccm_encrypt(&mut out, 23, 0x0303, &mut buf, po, len);
+    let mut payload = buf[off + 5..off + total].to_vec();
+    payload[9] ^= 0x01;
+    let mut inc = br_sslrec_in_ccm_init(&br_aes_ct_ctrcbc_vtable, &KEY, &FIXED_IV, 16);
+    assert!(ccm_decrypt(&mut inc, 23, 0x0303, &mut payload).is_none());
+}
+
 // ---- ChaCha20-Poly1305 record layer ----------------------------------------
 
 use bearssl::symcipher::{br_chacha20_ct_run, br_poly1305_ctmul_run};

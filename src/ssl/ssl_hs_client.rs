@@ -496,14 +496,21 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                     eng.dp_stack[eng.dp - 2] = eng.dp_stack[eng.dp - 1];
                     eng.dp_stack[eng.dp - 1] = a;
                 }
-                69 | 70 => {
-                    // switch-aesccm-in/out (unsupported)
-                    let _tag = pop!(eng);
-                    let _ckl = pop!(eng);
-                    let _prf = pop!(eng);
-                    let _ic = pop!(eng);
-                    eng.fail(BR_ERR_INVALID_ALGORITHM);
-                    break 'next;
+                69 => {
+                    // switch-aesccm-in
+                    let tag_len = pop!(eng) as usize;
+                    let cipher_key_len = pop!(eng) as usize;
+                    let prf_id = pop!(eng) as i32;
+                    let is_client = pop!(eng) != 0;
+                    eng.switch_ccm_in(is_client, prf_id, cipher_key_len, tag_len);
+                }
+                70 => {
+                    // switch-aesccm-out
+                    let tag_len = pop!(eng) as usize;
+                    let cipher_key_len = pop!(eng) as usize;
+                    let prf_id = pop!(eng) as i32;
+                    let is_client = pop!(eng) != 0;
+                    eng.switch_ccm_out(is_client, prf_id, cipher_key_len, tag_len);
                 }
                 71 => {
                     let cipher_key_len = pop!(eng) as usize;
@@ -517,15 +524,23 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                     let is_client = pop!(eng) != 0;
                     eng.switch_gcm_out(is_client, prf_id, cipher_key_len);
                 }
-                73 | 74 => {
-                    // switch-cbc-in/out (unsupported in this build)
-                    let _ckl = pop!(eng);
-                    let _aes = pop!(eng);
-                    let _mac = pop!(eng);
-                    let _prf = pop!(eng);
-                    let _ic = pop!(eng);
-                    eng.fail(BR_ERR_INVALID_ALGORITHM);
-                    break 'next;
+                73 => {
+                    // switch-cbc-in
+                    let cipher_key_len = pop!(eng) as usize;
+                    let aes = pop!(eng) != 0;
+                    let mac_id = pop!(eng) as i32;
+                    let prf_id = pop!(eng) as i32;
+                    let is_client = pop!(eng) != 0;
+                    eng.switch_cbc_in(is_client, prf_id, mac_id, aes, cipher_key_len);
+                }
+                74 => {
+                    // switch-cbc-out
+                    let cipher_key_len = pop!(eng) as usize;
+                    let aes = pop!(eng) != 0;
+                    let mac_id = pop!(eng) as i32;
+                    let prf_id = pop!(eng) as i32;
+                    let is_client = pop!(eng) != 0;
+                    eng.switch_cbc_out(is_client, prf_id, mac_id, aes, cipher_key_len);
                 }
                 75 => {
                     let prf_id = pop!(eng) as i32;

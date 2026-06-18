@@ -17,7 +17,10 @@ use crate::hash::{
 };
 use crate::rsa::br_rsa_pkcs1_vrfy_get_default;
 use crate::ssl::{br_tls10_prf, br_tls12_sha256_prf, br_tls12_sha384_prf, br_tls_prf_impl};
-use crate::symcipher::{br_aes_ct_ctr_vtable, br_chacha20_ct_run, br_poly1305_ctmul_run};
+use crate::symcipher::{
+    br_aes_ct_cbcdec_vtable, br_aes_ct_cbcenc_vtable, br_aes_ct_ctr_vtable, br_aes_ct_ctrcbc_vtable,
+    br_chacha20_ct_run, br_des_ct_cbcdec_vtable, br_des_ct_cbcenc_vtable, br_poly1305_ctmul_run,
+};
 use crate::x509::{br_x509_minimal_init, br_x509_trust_anchor, X509Engine};
 
 use super::ssl_engine::*;
@@ -35,21 +38,41 @@ pub mod suites {
     pub const ECDH_RSA_WITH_AES_128_GCM_SHA256: u16 = 0xC031;
     pub const RSA_WITH_AES_128_GCM_SHA256: u16 = 0x009C;
     pub const RSA_WITH_AES_256_GCM_SHA384: u16 = 0x009D;
+    // CBC suites (HMAC-then-encrypt).
+    pub const ECDHE_RSA_WITH_AES_128_CBC_SHA256: u16 = 0xC027;
+    pub const ECDHE_RSA_WITH_AES_128_CBC_SHA: u16 = 0xC013;
+    pub const ECDHE_ECDSA_WITH_AES_128_CBC_SHA256: u16 = 0xC023;
+    pub const ECDHE_ECDSA_WITH_AES_128_CBC_SHA: u16 = 0xC009;
+    pub const RSA_WITH_AES_128_CBC_SHA256: u16 = 0x003C;
+    pub const RSA_WITH_AES_128_CBC_SHA: u16 = 0x002F;
+    pub const RSA_WITH_AES_256_CBC_SHA: u16 = 0x0035;
+    // CCM suites.
+    pub const ECDHE_ECDSA_WITH_AES_128_CCM: u16 = 0xC0AC;
+    pub const ECDHE_ECDSA_WITH_AES_128_CCM_8: u16 = 0xC0AE;
 }
 
 /// The default suite list for a client supporting the implemented record
-/// layers (subset of the upstream "full" list).
-pub const SUITES_SUPPORTED: [u16; 10] = [
+/// layers (GCM, ChaCha20-Poly1305, CBC and CCM).
+pub const SUITES_SUPPORTED: [u16; 19] = [
     suites::ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
     suites::ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
     suites::ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
     suites::ECDHE_RSA_WITH_AES_128_GCM_SHA256,
     suites::ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
     suites::ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    suites::ECDHE_ECDSA_WITH_AES_128_CCM,
+    suites::ECDHE_ECDSA_WITH_AES_128_CCM_8,
+    suites::ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+    suites::ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+    suites::ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+    suites::ECDHE_RSA_WITH_AES_128_CBC_SHA,
     suites::ECDH_ECDSA_WITH_AES_128_GCM_SHA256,
     suites::ECDH_RSA_WITH_AES_128_GCM_SHA256,
     suites::RSA_WITH_AES_128_GCM_SHA256,
     suites::RSA_WITH_AES_256_GCM_SHA384,
+    suites::RSA_WITH_AES_128_CBC_SHA256,
+    suites::RSA_WITH_AES_128_CBC_SHA,
+    suites::RSA_WITH_AES_256_CBC_SHA,
 ];
 
 /// Default X.509 validation date used by [`br_ssl_client_context::init_full`]
@@ -102,6 +125,23 @@ impl br_ssl_engine_context {
         self.has_chapol = true;
         self.ichacha = Some(br_chacha20_ct_run);
         self.ipoly = Some(br_poly1305_ctmul_run);
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_engine_set_default_aes_cbc`)
+    pub fn set_default_aes_cbc(&mut self) {
+        self.iaes_cbcenc = Some(&br_aes_ct_cbcenc_vtable);
+        self.iaes_cbcdec = Some(&br_aes_ct_cbcdec_vtable);
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_engine_set_default_aes_ccm`)
+    pub fn set_default_aes_ccm(&mut self) {
+        self.iaes_ctrcbc = Some(&br_aes_ct_ctrcbc_vtable);
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_engine_set_default_des_cbc`)
+    pub fn set_default_des_cbc(&mut self) {
+        self.ides_cbcenc = Some(&br_des_ct_cbcenc_vtable);
+        self.ides_cbcdec = Some(&br_des_ct_cbcdec_vtable);
     }
 
     /// see bearssl_ssl.h (`br_ssl_engine_set_default_ec`)
@@ -174,6 +214,9 @@ impl br_ssl_client_context {
         cc.eng.set_prf_sha384(br_tls12_sha384_prf);
 
         cc.eng.set_default_aes_gcm();
+        cc.eng.set_default_aes_ccm();
+        cc.eng.set_default_aes_cbc();
+        cc.eng.set_default_des_cbc();
         cc.eng.set_default_chapol();
         cc
     }

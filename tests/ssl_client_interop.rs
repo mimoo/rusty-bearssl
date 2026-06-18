@@ -220,6 +220,45 @@ fn spawn_brssl_server(
     (stream, stderr_buf, guard)
 }
 
+#[test]
+fn rust_client_vs_brssl_server_cbc() {
+    let dir = match brssl_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("skipping: brssl build not found (set BRSSL_DIR)");
+            return;
+        }
+    };
+    let brssl = dir.join("build/brssl");
+    let cert = dir.join("samples/cert-ee-rsa.pem");
+    let key = dir.join("samples/key-ee-rsa.pem");
+    let ica = dir.join("samples/cert-ica-rsa.pem");
+    if !cert.exists() || !key.exists() {
+        eprintln!("skipping: sample certs not found");
+        return;
+    }
+    let chain_path = std::env::temp_dir().join("bearssl_rs_chain_cbc.pem");
+    {
+        let mut c = std::fs::read(&cert).unwrap();
+        if let Ok(mut i) = std::fs::read(&ica) {
+            c.append(&mut i);
+        }
+        std::fs::write(&chain_path, &c).unwrap();
+    }
+    let port = {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    // AES-128-CBC with SHA-256 MAC over ECDHE-RSA: exercises explicit-IV CBC.
+    run_client_vs_brssl(
+        &brssl,
+        &chain_path,
+        &key,
+        port,
+        "ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+    );
+}
+
 fn run_client_vs_brssl(brssl: &std::path::Path, chain_path: &std::path::Path, key: &std::path::Path, port: u16, cs: &str) {
     let (stream, stderr_buf, _guard) = spawn_brssl_server(brssl, chain_path, key, port, cs);
 

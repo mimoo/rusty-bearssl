@@ -27,9 +27,11 @@ use crate::hash::{
 use crate::inner::{br_dec16be, br_enc16be};
 use crate::rand::{br_hmac_drbg_context, br_hmac_drbg_update};
 use crate::ssl::{
-    br_sslrec_chapol_context, br_sslrec_gcm_context, br_tls_prf_impl, br_tls_prf_seed_chunk,
-    chapol_check_length, chapol_decrypt, chapol_encrypt, chapol_max_plaintext, gcm_check_length,
-    gcm_decrypt, gcm_encrypt, gcm_max_plaintext,
+    br_sslrec_ccm_context, br_sslrec_chapol_context, br_sslrec_gcm_context,
+    br_sslrec_in_cbc_context, br_sslrec_out_cbc_context, br_tls_prf_impl, br_tls_prf_seed_chunk,
+    cbc_check_length, cbc_decrypt, cbc_encrypt, cbc_max_plaintext, ccm_check_length, ccm_decrypt,
+    ccm_encrypt, ccm_max_plaintext, chapol_check_length, chapol_decrypt, chapol_encrypt,
+    chapol_max_plaintext, gcm_check_length, gcm_decrypt, gcm_encrypt, gcm_max_plaintext,
 };
 use crate::symcipher::{br_block_ctr_class, br_chacha20_run};
 
@@ -174,6 +176,8 @@ pub(super) enum InRec {
     Clear,
     Gcm(br_sslrec_gcm_context),
     Chapol(br_sslrec_chapol_context),
+    Cbc(br_sslrec_in_cbc_context),
+    Ccm(br_sslrec_ccm_context),
 }
 
 /// Outgoing record encryption handler.
@@ -181,6 +185,8 @@ pub(super) enum OutRec {
     Clear,
     Gcm(br_sslrec_gcm_context),
     Chapol(br_sslrec_chapol_context),
+    Cbc(br_sslrec_out_cbc_context),
+    Ccm(br_sslrec_ccm_context),
 }
 
 impl InRec {
@@ -189,6 +195,8 @@ impl InRec {
             InRec::Clear => rlen <= 16384,
             InRec::Gcm(cc) => gcm_check_length(cc, rlen),
             InRec::Chapol(cc) => chapol_check_length(cc, rlen),
+            InRec::Cbc(cc) => cbc_check_length(cc, rlen),
+            InRec::Ccm(cc) => ccm_check_length(cc, rlen),
         }
     }
 }
@@ -204,6 +212,8 @@ impl OutRec {
             }
             OutRec::Gcm(cc) => gcm_max_plaintext(cc, start, end),
             OutRec::Chapol(cc) => chapol_max_plaintext(cc, start, end),
+            OutRec::Cbc(cc) => cbc_max_plaintext(cc, start, end),
+            OutRec::Ccm(cc) => ccm_max_plaintext(cc, start, end),
         }
     }
 }
@@ -270,6 +280,14 @@ pub struct br_ssl_engine_context {
     /// Record-layer availability flags (mirror the `i*_in/out` vtable pointers).
     pub(super) has_gcm: bool,
     pub(super) has_chapol: bool,
+
+    /// CBC block-cipher implementations (`iaes_cbcenc/dec`, `ides_cbcenc/dec`).
+    pub(super) iaes_cbcenc: Option<&'static crate::symcipher::br_block_cbcenc_class>,
+    pub(super) iaes_cbcdec: Option<&'static crate::symcipher::br_block_cbcdec_class>,
+    pub(super) ides_cbcenc: Option<&'static crate::symcipher::br_block_cbcenc_class>,
+    pub(super) ides_cbcdec: Option<&'static crate::symcipher::br_block_cbcdec_class>,
+    /// CCM combined CTR+CBC-MAC implementation (`iaes_ctrcbc`).
+    pub(super) iaes_ctrcbc: Option<&'static crate::symcipher::br_block_ctrcbc_class>,
 
     /// EC / signature verification implementations.
     pub(super) iec: Option<&'static crate::ec::br_ec_impl>,
@@ -463,6 +481,11 @@ impl br_ssl_engine_context {
             ipoly: None,
             has_gcm: false,
             has_chapol: false,
+            iaes_cbcenc: None,
+            iaes_cbcdec: None,
+            ides_cbcenc: None,
+            ides_cbcdec: None,
+            iaes_ctrcbc: None,
             iec: None,
             irsavrfy: None,
             iecdsa: None,

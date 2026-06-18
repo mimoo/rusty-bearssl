@@ -32,6 +32,7 @@ mod ssl_hs_client;
 mod ssl_hs_server;
 mod ssl_io;
 mod ssl_rec_cbc;
+mod ssl_rec_ccm;
 mod ssl_rec_chapol;
 mod ssl_rec_gcm;
 
@@ -46,6 +47,10 @@ pub use ssl_io::{br_sslio_context, LowRead, LowResult, LowWrite};
 pub use ssl_rec_cbc::{
     br_sslrec_in_cbc_context, br_sslrec_in_cbc_init, br_sslrec_out_cbc_context,
     br_sslrec_out_cbc_init, cbc_check_length, cbc_decrypt, cbc_encrypt, cbc_max_plaintext,
+};
+pub use ssl_rec_ccm::{
+    br_sslrec_ccm_context, br_sslrec_in_ccm_init, br_sslrec_out_ccm_init, ccm_check_length,
+    ccm_decrypt, ccm_encrypt, ccm_max_plaintext,
 };
 
 pub use prf::br_tls_phash;

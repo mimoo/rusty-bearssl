@@ -104,6 +104,174 @@ impl br_ssl_engine_context {
         self.incrypt = true;
     }
 
+    /// see inner.h (`br_ssl_engine_switch_cbc_in`)
+    pub(super) fn switch_cbc_in(
+        &mut self,
+        is_client: bool,
+        prf_id: i32,
+        mac_id: i32,
+        aes: bool,
+        cipher_key_len: usize,
+    ) {
+        let imh = crate::hash::br_multihash_getimpl(&self.mhash, mac_id).expect("mac hash not set");
+        let mac_out_len = ((imh.desc >> crate::hash::BR_HASHDESC_OUT_OFF)
+            & crate::hash::BR_HASHDESC_OUT_MASK) as usize;
+        let mac_key_len = mac_out_len;
+        let bc = if aes {
+            self.iaes_cbcdec.expect("aes cbcdec not set")
+        } else {
+            self.ides_cbcdec.expect("des cbcdec not set")
+        };
+        let blen = bc.block_size as usize;
+        let iv_len = if self.get16(OFF_SESSION_VERSION) >= BR_TLS11 {
+            0
+        } else {
+            blen
+        };
+        let mut kb = [0u8; 192];
+        self.compute_key_block(prf_id, mac_key_len + cipher_key_len + iv_len, &mut kb);
+        let (mac_key, cipher_key, iv): (&[u8], &[u8], Option<&[u8]>) = if is_client {
+            (
+                &kb[mac_key_len..mac_key_len * 2],
+                &kb[(mac_key_len << 1) + cipher_key_len..(mac_key_len << 1) + cipher_key_len * 2],
+                if iv_len == 0 {
+                    None
+                } else {
+                    Some(&kb[((mac_key_len + cipher_key_len) << 1) + iv_len
+                        ..((mac_key_len + cipher_key_len) << 1) + iv_len * 2])
+                },
+            )
+        } else {
+            (
+                &kb[0..mac_key_len],
+                &kb[mac_key_len << 1..(mac_key_len << 1) + cipher_key_len],
+                if iv_len == 0 {
+                    None
+                } else {
+                    Some(
+                        &kb[(mac_key_len + cipher_key_len) << 1
+                            ..((mac_key_len + cipher_key_len) << 1) + iv_len],
+                    )
+                },
+            )
+        };
+        self.in_rec = InRec::Cbc(crate::ssl::br_sslrec_in_cbc_init(
+            bc,
+            &cipher_key[..cipher_key_len],
+            imh,
+            &mac_key[..mac_key_len],
+            mac_out_len,
+            iv,
+        ));
+        self.incrypt = true;
+    }
+
+    /// see inner.h (`br_ssl_engine_switch_cbc_out`)
+    pub(super) fn switch_cbc_out(
+        &mut self,
+        is_client: bool,
+        prf_id: i32,
+        mac_id: i32,
+        aes: bool,
+        cipher_key_len: usize,
+    ) {
+        let imh = crate::hash::br_multihash_getimpl(&self.mhash, mac_id).expect("mac hash not set");
+        let mac_out_len = ((imh.desc >> crate::hash::BR_HASHDESC_OUT_OFF)
+            & crate::hash::BR_HASHDESC_OUT_MASK) as usize;
+        let mac_key_len = mac_out_len;
+        let bc = if aes {
+            self.iaes_cbcenc.expect("aes cbcenc not set")
+        } else {
+            self.ides_cbcenc.expect("des cbcenc not set")
+        };
+        let blen = bc.block_size as usize;
+        let iv_len = if self.get16(OFF_SESSION_VERSION) >= BR_TLS11 {
+            0
+        } else {
+            blen
+        };
+        let mut kb = [0u8; 192];
+        self.compute_key_block(prf_id, mac_key_len + cipher_key_len + iv_len, &mut kb);
+        let (mac_key, cipher_key, iv): (&[u8], &[u8], Option<&[u8]>) = if is_client {
+            (
+                &kb[0..mac_key_len],
+                &kb[mac_key_len << 1..(mac_key_len << 1) + cipher_key_len],
+                if iv_len == 0 {
+                    None
+                } else {
+                    Some(
+                        &kb[(mac_key_len + cipher_key_len) << 1
+                            ..((mac_key_len + cipher_key_len) << 1) + iv_len],
+                    )
+                },
+            )
+        } else {
+            (
+                &kb[mac_key_len..mac_key_len * 2],
+                &kb[(mac_key_len << 1) + cipher_key_len..(mac_key_len << 1) + cipher_key_len * 2],
+                if iv_len == 0 {
+                    None
+                } else {
+                    Some(&kb[((mac_key_len + cipher_key_len) << 1) + iv_len
+                        ..((mac_key_len + cipher_key_len) << 1) + iv_len * 2])
+                },
+            )
+        };
+        self.out_rec = OutRec::Cbc(crate::ssl::br_sslrec_out_cbc_init(
+            bc,
+            &cipher_key[..cipher_key_len],
+            imh,
+            &mac_key[..mac_key_len],
+            mac_out_len,
+            iv,
+        ));
+    }
+
+    /// see inner.h (`br_ssl_engine_switch_ccm_in`)
+    pub(super) fn switch_ccm_in(
+        &mut self,
+        is_client: bool,
+        prf_id: i32,
+        cipher_key_len: usize,
+        tag_len: usize,
+    ) {
+        let bc = self.iaes_ctrcbc.expect("aes ctrcbc not set");
+        let mut kb = [0u8; 72];
+        self.compute_key_block(prf_id, cipher_key_len + 4, &mut kb);
+        let (cipher_key, iv): (&[u8], &[u8]) = if is_client {
+            (
+                &kb[cipher_key_len..cipher_key_len * 2],
+                &kb[(cipher_key_len << 1) + 4..(cipher_key_len << 1) + 8],
+            )
+        } else {
+            (&kb[0..cipher_key_len], &kb[cipher_key_len << 1..(cipher_key_len << 1) + 4])
+        };
+        self.in_rec = InRec::Ccm(crate::ssl::br_sslrec_in_ccm_init(bc, cipher_key, iv, tag_len));
+        self.incrypt = true;
+    }
+
+    /// see inner.h (`br_ssl_engine_switch_ccm_out`)
+    pub(super) fn switch_ccm_out(
+        &mut self,
+        is_client: bool,
+        prf_id: i32,
+        cipher_key_len: usize,
+        tag_len: usize,
+    ) {
+        let bc = self.iaes_ctrcbc.expect("aes ctrcbc not set");
+        let mut kb = [0u8; 72];
+        self.compute_key_block(prf_id, cipher_key_len + 4, &mut kb);
+        let (cipher_key, iv): (&[u8], &[u8]) = if is_client {
+            (&kb[0..cipher_key_len], &kb[cipher_key_len << 1..(cipher_key_len << 1) + 4])
+        } else {
+            (
+                &kb[cipher_key_len..cipher_key_len * 2],
+                &kb[(cipher_key_len << 1) + 4..(cipher_key_len << 1) + 8],
+            )
+        };
+        self.out_rec = OutRec::Ccm(crate::ssl::br_sslrec_out_ccm_init(bc, cipher_key, iv, tag_len));
+    }
+
     /// see inner.h (`br_ssl_engine_switch_chapol_out`)
     pub(super) fn switch_chapol_out(&mut self, is_client: bool, prf_id: i32) {
         let mut kb = [0u8; 88];
