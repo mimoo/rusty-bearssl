@@ -161,6 +161,22 @@ mod x509_knownkey;
 mod x509_minimal;
 mod skey_decoder;
 
+pub mod asn1enc;
+mod encode_ec_pk8der;
+mod encode_ec_rawder;
+mod encode_rsa_pk8der;
+mod encode_rsa_rawder;
+
+pub use asn1enc::{
+    br_asn1_encode_length, br_asn1_encode_uint, br_asn1_uint, br_asn1_uint_prepare, len_of_len,
+};
+pub use encode_ec_pk8der::br_encode_ec_pkcs8_der;
+pub use encode_ec_rawder::{
+    br_encode_ec_raw_der, br_encode_ec_raw_der_inner, br_get_curve_OID,
+};
+pub use encode_rsa_pk8der::br_encode_rsa_pkcs8_der;
+pub use encode_rsa_rawder::br_encode_rsa_raw_der;
+
 pub use skey_decoder::{
     br_skey_decoder_context, br_skey_decoder_init, br_skey_decoder_push,
 };

@@ -21,9 +21,8 @@ mod enc32be;
 mod enc32le;
 mod enc64be;
 mod enc64le;
-// PEM encode/decode (T0-generated state machine) ported in a later pass:
-// mod pemdec;
-// mod pemenc;
+mod pemdec;
+mod pemenc;
 
 pub use ccopy::br_ccopy;
 pub use dec16be::br_range_dec16be;
@@ -38,3 +37,9 @@ pub use enc32be::br_range_enc32be;
 pub use enc32le::br_range_enc32le;
 pub use enc64be::br_range_enc64be;
 pub use enc64le::br_range_enc64le;
+pub use pemdec::{
+    br_pem_decoder_context, br_pem_decoder_event, br_pem_decoder_init,
+    br_pem_decoder_push, br_pem_decoder_setdest, BR_PEM_BEGIN_OBJ, BR_PEM_END_OBJ,
+    BR_PEM_ERROR,
+};
+pub use pemenc::{br_pem_encode, BR_PEM_CRLF, BR_PEM_LINE64};
