@@ -29,16 +29,19 @@ pub trait Aead {
 }
 
 mod ccm;
+mod eax;
 mod gcm;
 
 pub use ccm::{
     br_ccm_aad_inject, br_ccm_check_tag, br_ccm_context, br_ccm_flip, br_ccm_get_tag, br_ccm_init,
     br_ccm_reset, br_ccm_run,
 };
+pub use eax::{
+    br_eax_aad_inject, br_eax_capture, br_eax_check_tag, br_eax_check_tag_trunc, br_eax_context,
+    br_eax_flip, br_eax_get_tag, br_eax_get_tag_trunc, br_eax_init, br_eax_reset,
+    br_eax_reset_post_aad, br_eax_reset_pre_aad, br_eax_run, br_eax_state,
+};
 pub use gcm::{
     br_gcm_aad_inject, br_gcm_check_tag, br_gcm_check_tag_trunc, br_gcm_context, br_gcm_flip,
     br_gcm_get_tag, br_gcm_get_tag_trunc, br_gcm_init, br_gcm_reset, br_gcm_run,
 };
-
-// CCM and EAX (ccm.c, eax.c) build on the CTR+CBC-MAC block-cipher class;
-// ported in a later pass once that class has an AES implementation.
