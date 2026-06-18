@@ -15,8 +15,14 @@ use crate::hash::{
     br_md5_vtable, br_sha1_vtable, br_sha224_vtable, br_sha256_vtable, br_sha384_vtable,
     br_sha512_vtable, br_ghash_ctmul, br_md5_ID, br_sha512_ID,
 };
-use crate::rsa::br_rsa_pkcs1_vrfy_get_default;
-use crate::ssl::{br_tls10_prf, br_tls12_sha256_prf, br_tls12_sha384_prf, br_tls_prf_impl};
+use crate::rsa::{
+    br_rsa_pkcs1_sign, br_rsa_pkcs1_sign_get_default, br_rsa_pkcs1_vrfy_get_default,
+    br_rsa_private_key, BR_HASH_OID_SHA1, BR_HASH_OID_SHA224, BR_HASH_OID_SHA256,
+    BR_HASH_OID_SHA384, BR_HASH_OID_SHA512,
+};
+use crate::ssl::{
+    br_tls10_prf, br_tls12_sha256_prf, br_tls12_sha384_prf, br_tls_prf_impl, BR_AUTH_RSA,
+};
 use crate::symcipher::{
     br_aes_ct_cbcdec_vtable, br_aes_ct_cbcenc_vtable, br_aes_ct_ctr_vtable, br_aes_ct_ctrcbc_vtable,
     br_chacha20_ct_run, br_des_ct_cbcdec_vtable, br_des_ct_cbcenc_vtable, br_poly1305_ctmul_run,
@@ -253,5 +259,82 @@ impl br_ssl_client_context {
 
         self.eng.hs_reset(HsKind::Client);
         self.eng.last_error() == BR_ERR_OK
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_client_set_single_rsa`).
+    ///
+    /// Install a single-certificate RSA client-auth handler: when the server
+    /// sends a CertificateRequest, the client presents `chain` and signs the
+    /// CertificateVerify with the RSA private key `sk`.
+    pub fn set_single_rsa(&mut self, chain: Vec<Vec<u8>>, sk: RsaPrivateKeyParts) {
+        let policy = SingleRsaClientCert {
+            chain,
+            sk,
+            irsasign: br_rsa_pkcs1_sign_get_default(),
+        };
+        self.eng.client_auth = Some(Box::new(policy));
+    }
+}
+
+/// Owned RSA private-key parameters for [`br_ssl_client_context::set_single_rsa`].
+pub use super::ssl_server::RsaPrivateKeyParts;
+
+const CLIENT_HASH_OID: [&[u8]; 5] = [
+    BR_HASH_OID_SHA1,
+    BR_HASH_OID_SHA224,
+    BR_HASH_OID_SHA256,
+    BR_HASH_OID_SHA384,
+    BR_HASH_OID_SHA512,
+];
+
+/// Single-RSA-certificate client-auth policy
+/// (`br_ssl_client_certificate_rsa_context`).
+struct SingleRsaClientCert {
+    chain: Vec<Vec<u8>>,
+    sk: RsaPrivateKeyParts,
+    irsasign: br_rsa_pkcs1_sign,
+}
+
+impl ClientCertPolicy for SingleRsaClientCert {
+    fn choose(&self, auth_types: u32) -> ClientCertChoices {
+        // `cc_choose`: pick a hash for the RSA signature. If none of the
+        // advertised (hash,RSA) pairs are usable and raw RSA (bit 0) is not
+        // offered either, the caller gets auth_type 0 (no certificate).
+        let x = br_ssl_choose_hash(auth_types);
+        let usable = !(x == 0 && (auth_types & 1) == 0);
+        ClientCertChoices {
+            auth_type: if usable { BR_AUTH_RSA } else { 0 },
+            hash_id: x,
+            chain: if usable { self.chain.clone() } else { Vec::new() },
+        }
+    }
+
+    fn do_sign(&self, hash_id: i32, hv_len: usize, data: &mut [u8], len: usize) -> usize {
+        let mut hv = [0u8; 64];
+        hv[..hv_len].copy_from_slice(&data[..hv_len]);
+        let hash_oid: Option<&[u8]> = if hash_id == 0 {
+            None
+        } else if (2..=6).contains(&hash_id) {
+            Some(CLIENT_HASH_OID[(hash_id - 2) as usize])
+        } else {
+            return 0;
+        };
+        let sig_len = ((self.sk.n_bitlen + 7) >> 3) as usize;
+        if len < sig_len {
+            return 0;
+        }
+        let key = br_rsa_private_key {
+            n_bitlen: self.sk.n_bitlen,
+            p: &self.sk.p,
+            q: &self.sk.q,
+            dp: &self.sk.dp,
+            dq: &self.sk.dq,
+            iq: &self.sk.iq,
+        };
+        if (self.irsasign)(hash_oid, &hv[..hv_len], hv_len, &key, &mut data[..sig_len]) == 1 {
+            sig_len
+        } else {
+            0
+        }
     }
 }

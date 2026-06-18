@@ -332,6 +332,8 @@ pub struct br_ssl_engine_context {
     pub(super) hash_cv_id: i32,
     /// Server policy (certificate chain + key operations).
     pub(super) policy: Option<Box<dyn ServerPolicy>>,
+    /// Client-certificate auth policy (None = no client auth offered).
+    pub(super) client_auth: Option<Box<dyn ClientCertPolicy>>,
     /// Session cache (None = no cache configured).
     pub(super) cache: Option<Box<dyn SslSessionCache>>,
 
@@ -389,6 +391,34 @@ pub trait ServerPolicy {
     /// `do_sign`: sign the prepared `data[..hv_len]` in place (room `len`).
     /// Returns the signature length, or 0 on error.
     fn do_sign(&self, algo_id: u32, data: &mut [u8], hv_len: usize, len: usize) -> usize;
+}
+
+/// Client-certificate auth selectors (`inc/bearssl_ssl.h`).
+pub const BR_AUTH_RSA: i32 = 2;
+pub const BR_AUTH_ECDSA: i32 = 3;
+
+/// Output of a client-cert policy's `choose` (`br_ssl_client_certificate`).
+pub struct ClientCertChoices {
+    /// `BR_AUTH_RSA` or `BR_AUTH_ECDSA` (or 0 for "no certificate").
+    pub auth_type: i32,
+    /// Hash function id for the signature (0 = MD5+SHA-1 / pre-TLS1.2).
+    pub hash_id: i32,
+    /// Client certificate chain (DER blobs) to send.
+    pub chain: Vec<Vec<u8>>,
+}
+
+/// Client-certificate authentication policy
+/// (`br_ssl_client_certificate_class`): selects the chain + signature
+/// parameters in response to the server's CertificateRequest, and signs the
+/// handshake hash for the CertificateVerify message.
+pub trait ClientCertPolicy {
+    /// `choose`: react to the server's CertificateRequest. `auth_types` is the
+    /// bitfield of acceptable (hash, signature) algorithms.
+    fn choose(&self, auth_types: u32) -> ClientCertChoices;
+    /// `do_sign`: sign the prepared `data[..hv_len]` in place (room `len`).
+    /// Returns the signature length, or 0 on error. For static-ECDH client
+    /// auth this is unused (the C `do_sign` pointer is NULL).
+    fn do_sign(&self, hash_id: i32, hv_len: usize, data: &mut [u8], len: usize) -> usize;
 }
 
 /// Session cache abstraction (`br_ssl_session_cache_class`). Optional.
@@ -574,6 +604,7 @@ impl br_ssl_engine_context {
             hash_cv_len: 0,
             hash_cv_id: 0,
             policy: None,
+            client_auth: None,
             cache: None,
             dp_stack: [0; 32],
             rp_stack: [0; 32],

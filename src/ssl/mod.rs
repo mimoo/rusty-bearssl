@@ -23,13 +23,21 @@
 //! - Blocking I/O wrapper (`ssl_io.c`, [`br_sslio_context`]).
 //! - LRU session cache (`ssl_lru.c`, [`br_ssl_session_cache_lru`]).
 //!
+//! - Client-certificate authentication (mutual TLS): the signature-based
+//!   single-RSA client-auth policy (`ssl_ccert_single_rsa.c`) plus the
+//!   `do-client-sign` handshake path. The client presents its certificate and
+//!   signs the CertificateVerify when the server sends a CertificateRequest
+//!   (see [`br_ssl_client_context::set_single_rsa`]). Verified live against
+//!   `brssl server -CA`.
+//!
 //! ## Deferred
 //!
-//! - Client-certificate authentication (`ssl_ccert_single_rsa.c` /
-//!   `ssl_ccert_single_ec.c` and the `do-client-sign` handshake path): the
-//!   client interpreter currently fails the handshake if the server requests a
-//!   client certificate (`BR_ERR_INVALID_ALGORITHM`), matching a client with no
-//!   configured client-auth handler.
+//! - Static-ECDH client authentication (`BR_AUTH_ECDH`, the `do_keyx` branch of
+//!   `ssl_ccert_single_ec.c`): the [`ClientCertPolicy`] trait covers the
+//!   signature path (`choose` + `do_sign`); the static-ECDH client-auth key
+//!   exchange is not wired. The single-EC signature (ECDSA) policy
+//!   (`ssl_ccert_single_ec.c` sign path) is structurally identical to the RSA
+//!   one and can be added the same way.
 
 /// A seed chunk for the TLS PRF (`br_tls_prf_seed_chunk`). The label and seed
 /// are concatenated as the PRF input; chunks may be empty.
@@ -68,7 +76,10 @@ pub use ssl_engine::{
 };
 
 pub use ssl_io::{br_sslio_context, LowRead, LowResult, LowWrite};
-pub use ssl_engine::{ServerChoices, ServerChooseCtx, ServerPolicy, SslSessionCache};
+pub use ssl_engine::{
+    ClientCertChoices, ClientCertPolicy, ServerChoices, ServerChooseCtx, ServerPolicy,
+    SslSessionCache, BR_AUTH_ECDSA, BR_AUTH_RSA,
+};
 pub use ssl_lru::br_ssl_session_cache_lru;
 pub use ssl_server::{
     br_ssl_server_context, RsaPrivateKeyParts, BR_KEYTYPE_EC, BR_KEYTYPE_RSA,

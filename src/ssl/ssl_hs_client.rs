@@ -310,9 +310,13 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                     eng.hlen_in = 0;
                 }
                 33 => {
-                    // do-client-sign (no client auth)
-                    eng.fail(BR_ERR_INVALID_ALGORITHM);
-                    break 'next;
+                    // do-client-sign
+                    let sig_len = make_client_sign(eng);
+                    if sig_len == 0 {
+                        eng.fail(BR_ERR_INVALID_ALGORITHM);
+                        break 'next;
+                    }
+                    push!(eng, sig_len as u32);
                 }
                 34 => {
                     let prf_id = pop!(eng) as i32;
@@ -360,10 +364,9 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                     eng.flush_record();
                 }
                 42 => {
-                    let _auth_types = pop!(eng);
-                    eng.set8(OFF_CLI_HASH_ID, 0);
-                    eng.chain.clear();
-                    eng.chain_idx = 0;
+                    // get-client-chain
+                    let auth_types = pop!(eng);
+                    get_client_chain(eng, auth_types);
                 }
                 43 => {
                     let (kt, usages) = pkey_type_usages(eng);
@@ -748,6 +751,51 @@ fn compute_finished_inner(eng: &mut br_ssl_engine_context, from_client: i32, prf
     let mut out = [0u8; 12];
     prf(&mut out, &ms, label, &seed);
     eng.mem[OFF_PAD..OFF_PAD + 12].copy_from_slice(&out);
+}
+
+/// `get-client-chain`: invoke the client-cert policy `choose` and record the
+/// selected auth type / hash id / chain. With no policy configured, this
+/// behaves like a client that has no certificate (`hash_id = 0`, empty chain).
+fn get_client_chain(eng: &mut br_ssl_engine_context, auth_types: u32) {
+    match eng.client_auth.take() {
+        Some(ca) => {
+            let ux = ca.choose(auth_types);
+            eng.set8(OFF_CLI_AUTH_TYPE, ux.auth_type as u8);
+            eng.set8(OFF_CLI_HASH_ID, ux.hash_id as u8);
+            eng.chain = ux.chain;
+            eng.chain_idx = 0;
+            eng.client_auth = Some(ca);
+        }
+        None => {
+            eng.set8(OFF_CLI_HASH_ID, 0);
+            eng.chain.clear();
+            eng.chain_idx = 0;
+        }
+    }
+}
+
+/// `make_client_sign`: hash the handshake messages so far and ask the
+/// client-cert policy to sign them (for the CertificateVerify message). Returns
+/// the signature length (written into `pad`), or 0 on error.
+fn make_client_sign(eng: &mut br_ssl_engine_context) -> usize {
+    let hash_id = eng.get8(OFF_CLI_HASH_ID) as i32;
+    let mut pad = [0u8; BR_SSL_PAD_LEN];
+    let hv_len = if hash_id != 0 {
+        br_multihash_out(&eng.mhash, hash_id, &mut pad)
+    } else {
+        br_multihash_out(&eng.mhash, br_md5_ID as i32, &mut pad);
+        br_multihash_out(&eng.mhash, br_sha1_ID as i32, &mut pad[16..]);
+        36
+    };
+    let ca = match eng.client_auth.take() {
+        Some(ca) => ca,
+        None => return 0,
+    };
+    let sig_len = ca.do_sign(hash_id, hv_len, &mut pad, BR_SSL_PAD_LEN);
+    eng.client_auth = Some(ca);
+    eng.mem[OFF_PAD..OFF_PAD + sig_len.min(BR_SSL_PAD_LEN)]
+        .copy_from_slice(&pad[..sig_len.min(BR_SSL_PAD_LEN)]);
+    sig_len
 }
 
 /// `make_pms_rsa`
