@@ -336,6 +336,38 @@ fn ecdsa_p256_kat_raw_and_asn1() {
     }
 }
 
+#[test]
+fn ecdsa_get_default_selectors_work() {
+    // The get_default selectors return working sign/verify fns: sign with the
+    // default signer, verify with the default verifier (raw and asn1 forms).
+    let signa = br_ecdsa_sign_asn1_get_default();
+    let vrfya = br_ecdsa_vrfy_asn1_get_default();
+    let signr = br_ecdsa_sign_raw_get_default();
+    let vrfyr = br_ecdsa_vrfy_raw_get_default();
+    let imp = br_ec_get_default();
+
+    let pk = br_ec_public_key {
+        curve: BR_EC_secp256r1,
+        q: &EC_P256_PUB_POINT,
+    };
+    let sk = br_ec_private_key {
+        curve: BR_EC_secp256r1,
+        x: &EC_P256_PRIV_X,
+    };
+    let kv = p256_ecdsa_kats().into_iter().next().unwrap();
+    let hash = hash_msg(kv.hf, kv.msg.as_bytes());
+
+    let mut out = [0u8; 150];
+    let n = signa(imp, kv.hf, &hash, &sk, &mut out);
+    assert!(n > 0);
+    assert_eq!(vrfya(imp, &hash, &pk, &out[..n]), 1, "asn1 sign/verify via defaults");
+
+    let mut outr = [0u8; 150];
+    let nr = signr(imp, kv.hf, &hash, &sk, &mut outr);
+    assert!(nr > 0);
+    assert_eq!(vrfyr(imp, &hash, &pk, &outr[..nr]), 1, "raw sign/verify via defaults");
+}
+
 // --- ASN.1 <-> raw conversion round-trip. ------------------------------------
 
 #[test]

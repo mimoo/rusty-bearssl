@@ -119,6 +119,28 @@ pub type br_rsa_pkcs1_sign = fn(
     x: &mut [u8],
 ) -> u32;
 
+/// Type for a RSA key-pair generator (`br_rsa_keygen`). Matches
+/// [`br_rsa_i31_keygen`]'s signature (the private-key and public buffers share
+/// the caller's lifetime).
+pub type br_rsa_keygen = for<'a> fn(
+    rng: &mut dyn PrngState,
+    sk: &mut br_rsa_private_key<'a>,
+    kbuf_priv: &'a mut [u8],
+    out_pub: Option<&'a mut [u8]>,
+    size: usize,
+    pubexp: u32,
+) -> (u32, Option<i31_keygen_inner::KeygenOut>);
+
+/// Type for the modulus recomputation engine (`br_rsa_compute_modulus`).
+pub type br_rsa_compute_modulus = fn(n: Option<&mut [u8]>, sk: &br_rsa_private_key) -> usize;
+
+/// Type for the private-exponent recomputation engine (`br_rsa_compute_privexp`).
+pub type br_rsa_compute_privexp =
+    fn(d: Option<&mut [u8]>, sk: &br_rsa_private_key, e: u32) -> usize;
+
+/// Type for the public-exponent recovery engine (`br_rsa_compute_pubexp`).
+pub type br_rsa_compute_pubexp = fn(sk: &br_rsa_private_key) -> u32;
+
 /// Type for a RSA signature verification engine (PSS) (`br_rsa_pss_vrfy`).
 pub type br_rsa_pss_vrfy = fn(
     x: &[u8],
@@ -241,4 +263,20 @@ pub fn br_rsa_oaep_encrypt_get_default() -> br_rsa_oaep_encrypt {
 /// see bearssl_rsa.h
 pub fn br_rsa_oaep_decrypt_get_default() -> br_rsa_oaep_decrypt {
     br_rsa_i31_oaep_decrypt
+}
+/// see bearssl_rsa.h (`br_rsa_keygen_get_default`)
+pub fn br_rsa_keygen_get_default() -> br_rsa_keygen {
+    br_rsa_i31_keygen
+}
+/// see bearssl_rsa.h (`br_rsa_compute_modulus_get_default`)
+pub fn br_rsa_compute_modulus_get_default() -> br_rsa_compute_modulus {
+    br_rsa_i31_compute_modulus
+}
+/// see bearssl_rsa.h (`br_rsa_compute_privexp_get_default`)
+pub fn br_rsa_compute_privexp_get_default() -> br_rsa_compute_privexp {
+    br_rsa_i31_compute_privexp
+}
+/// see bearssl_rsa.h (`br_rsa_compute_pubexp_get_default`)
+pub fn br_rsa_compute_pubexp_get_default() -> br_rsa_compute_pubexp {
+    br_rsa_i31_compute_pubexp
 }

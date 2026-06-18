@@ -181,3 +181,25 @@ pub use ecdsa_i31_sign_raw::br_ecdsa_i31_sign_raw;
 pub use ecdsa_i31_vrfy_asn1::br_ecdsa_i31_vrfy_asn1;
 pub use ecdsa_i31_vrfy_raw::br_ecdsa_i31_vrfy_raw;
 pub use ecdsa_rta::br_ecdsa_raw_to_asn1;
+
+// ---- default ECDSA bindings (`ecdsa_default_*.c`) ---------------------------
+//
+// BearSSL's `ecdsa_default_*.c` select the i31 ECDSA implementation in this
+// portable build (no i15/i62 specialisation).
+
+/// see bearssl_ec.h (`br_ecdsa_sign_asn1_get_default`)
+pub fn br_ecdsa_sign_asn1_get_default() -> br_ecdsa_sign {
+    br_ecdsa_i31_sign_asn1
+}
+/// see bearssl_ec.h (`br_ecdsa_sign_raw_get_default`)
+pub fn br_ecdsa_sign_raw_get_default() -> br_ecdsa_sign {
+    br_ecdsa_i31_sign_raw
+}
+/// see bearssl_ec.h (`br_ecdsa_vrfy_asn1_get_default`)
+pub fn br_ecdsa_vrfy_asn1_get_default() -> br_ecdsa_vrfy {
+    br_ecdsa_i31_vrfy_asn1
+}
+/// see bearssl_ec.h (`br_ecdsa_vrfy_raw_get_default`)
+pub fn br_ecdsa_vrfy_raw_get_default() -> br_ecdsa_vrfy {
+    br_ecdsa_i31_vrfy_raw
+}

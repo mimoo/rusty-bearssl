@@ -16,28 +16,29 @@
 //!   config (`ssl_client.c`/`ssl_client_full.c`). Completes live handshakes
 //!   against `brssl server` for ECDHE_RSA with GCM / CBC / ChaCha20-Poly1305.
 //! - TLS 1.2 SERVER: T0 handshake interpreter (`ssl_hs_server.c`) + config
-//!   (`ssl_server.c`, `ssl_server_full_rsa.c`, `ssl_server_full_ec.c`) and the
+//!   (`ssl_server.c`, `ssl_server_full_rsa.c`, `ssl_server_full_ec.c`), the
 //!   single-certificate policies (`ssl_scert_single_rsa.c`,
-//!   `ssl_scert_single_ec.c`). Completes live handshakes against `brssl client`
-//!   for ECDHE_RSA (GCM / CBC / ChaCha20-Poly1305) and RSA key exchange.
+//!   `ssl_scert_single_ec.c`), and the narrow single-suite profiles
+//!   (`ssl_server_min{e,f,r,u,v}2{g,c}.c` ->
+//!   [`br_ssl_server_context::init_mine2g`] and friends). Completes live
+//!   handshakes against `brssl client` for ECDHE_RSA (GCM / CBC /
+//!   ChaCha20-Poly1305) and RSA key exchange.
 //! - Blocking I/O wrapper (`ssl_io.c`, [`br_sslio_context`]).
 //! - LRU session cache (`ssl_lru.c`, [`br_ssl_session_cache_lru`]).
-//!
 //! - Client-certificate authentication (mutual TLS): the signature-based
-//!   single-RSA client-auth policy (`ssl_ccert_single_rsa.c`) plus the
-//!   `do-client-sign` handshake path. The client presents its certificate and
-//!   signs the CertificateVerify when the server sends a CertificateRequest
-//!   (see [`br_ssl_client_context::set_single_rsa`]). Verified live against
-//!   `brssl server -CA`.
+//!   single-RSA (`ssl_ccert_single_rsa.c`,
+//!   [`br_ssl_client_context::set_single_rsa`]) and single-EC/ECDSA
+//!   (`ssl_ccert_single_ec.c` sign path, [`br_ssl_client_context::set_single_ec`])
+//!   client-auth policies plus the `do-client-sign` handshake path. The client
+//!   presents its certificate and signs the CertificateVerify when the server
+//!   sends a CertificateRequest. Verified live against `brssl server -CA`.
 //!
 //! ## Deferred
 //!
 //! - Static-ECDH client authentication (`BR_AUTH_ECDH`, the `do_keyx` branch of
 //!   `ssl_ccert_single_ec.c`): the [`ClientCertPolicy`] trait covers the
-//!   signature path (`choose` + `do_sign`); the static-ECDH client-auth key
-//!   exchange is not wired. The single-EC signature (ECDSA) policy
-//!   (`ssl_ccert_single_ec.c` sign path) is structurally identical to the RSA
-//!   one and can be added the same way.
+//!   signature path (`choose` + `do_sign`); the (rare) static-ECDH client-auth
+//!   key exchange is not wired.
 
 /// A seed chunk for the TLS PRF (`br_tls_prf_seed_chunk`). The label and seed
 /// are concatenated as the PRF input; chunks may be empty.

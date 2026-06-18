@@ -302,6 +302,39 @@ pub fn br_x509_minimal_init<'a>(
     }
 }
 
+/// see bearssl_x509.h (`br_x509_minimal_init_full`).
+///
+/// Convenience builder: a minimal X.509 validation engine with SHA-256 DN
+/// hashing, the default i31 RSA (PKCS#1 v1.5) and ECDSA verifiers, and all six
+/// hash functions activated. (The validation engine still refuses MD5
+/// signatures.) Mirrors `x509_minimal_full.c`.
+pub fn br_x509_minimal_init_full<'a>(
+    trust_anchors: &'a [br_x509_trust_anchor<'a>],
+) -> br_x509_minimal_context<'a> {
+    use crate::ec::{br_ec_get_default, br_ecdsa_i31_vrfy_asn1};
+    use crate::hash::{
+        br_md5_vtable, br_sha1_vtable, br_sha224_vtable, br_sha256_vtable, br_sha384_vtable,
+        br_sha512_vtable, br_md5_ID, br_sha512_ID,
+    };
+    use crate::rsa::br_rsa_pkcs1_vrfy_get_default;
+
+    let mut xc = br_x509_minimal_init(&br_sha256_vtable, trust_anchors);
+    xc.set_rsa(br_rsa_pkcs1_vrfy_get_default());
+    xc.set_ecdsa(br_ec_get_default(), br_ecdsa_i31_vrfy_asn1);
+    let hashes: [&'static br_hash_class; 6] = [
+        &br_md5_vtable,
+        &br_sha1_vtable,
+        &br_sha224_vtable,
+        &br_sha256_vtable,
+        &br_sha384_vtable,
+        &br_sha512_vtable,
+    ];
+    for id in (br_md5_ID as i32)..=(br_sha512_ID as i32) {
+        xc.set_hash(id, Some(hashes[(id - 1) as usize]));
+    }
+    xc
+}
+
 impl X509Engine for br_x509_minimal_context<'_> {
     fn start_chain(&mut self, server_name: Option<&str>) {
         // Mirror xm_start_chain: reset name-element statuses, the output key,

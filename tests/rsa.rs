@@ -4,7 +4,7 @@
 use bearssl::hash::{br_sha1_vtable, br_sha256_vtable};
 use bearssl::rand::br_hmac_drbg_context;
 use bearssl::rsa::{
-    br_rsa_i31_compute_modulus, br_rsa_i31_oaep_decrypt,
+    br_rsa_i31_compute_modulus, br_rsa_i31_compute_pubexp, br_rsa_i31_oaep_decrypt,
     br_rsa_i31_oaep_encrypt, br_rsa_i31_pkcs1_sign, br_rsa_i31_pkcs1_vrfy, br_rsa_i31_private,
     br_rsa_i31_public, br_rsa_i31_pss_sign, br_rsa_i31_pss_vrfy, br_rsa_private_key,
     br_rsa_public_key, BR_HASH_OID_SHA1,
@@ -182,6 +182,32 @@ fn rsa_compute_modulus_matches_n() {
     let nlen = br_rsa_i31_compute_modulus(Some(&mut n), &sk);
     assert_eq!(nlen, 128);
     assert_eq!(&n[..nlen], RSA_N);
+}
+
+#[test]
+fn rsa_compute_get_default_selectors_work() {
+    use bearssl::rsa::{
+        br_rsa_compute_modulus_get_default, br_rsa_compute_privexp_get_default,
+        br_rsa_compute_pubexp_get_default,
+    };
+    let sk = rsa_sk();
+
+    // Modulus selector matches the i31 implementation / the known modulus.
+    let modf = br_rsa_compute_modulus_get_default();
+    let mut n = vec![0u8; 128];
+    assert_eq!(modf(Some(&mut n), &sk), 128);
+    assert_eq!(&n[..], RSA_N);
+
+    // Public-exponent selector dispatches to the i31 implementation (identical
+    // result on this key; recovery depends on the key's CRT exponents).
+    let pubf = br_rsa_compute_pubexp_get_default();
+    assert_eq!(pubf(&sk), br_rsa_i31_compute_pubexp(&sk));
+
+    // Private-exponent recomputation produces a non-empty d for e=65537.
+    let privf = br_rsa_compute_privexp_get_default();
+    let mut d = vec![0u8; 128];
+    let dlen = privf(Some(&mut d), &sk, 0x010001);
+    assert!(dlen > 0 && dlen <= 128);
 }
 
 // ---- OAEP encrypt -> decrypt round-trip -------------------------------------

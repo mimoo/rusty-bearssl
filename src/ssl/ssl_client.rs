@@ -10,7 +10,7 @@
 //! are wired up; CBC/CCM/3DES suites are accepted in the suite list but their
 //! key-switch opcodes fail the handshake if selected.
 
-use crate::ec::{br_ec_get_default, br_ecdsa_i31_vrfy_asn1};
+use crate::ec::{br_ec_get_default, br_ecdsa_i31_sign_asn1, br_ecdsa_i31_vrfy_asn1};
 use crate::hash::{
     br_md5_vtable, br_sha1_vtable, br_sha224_vtable, br_sha256_vtable, br_sha384_vtable,
     br_sha512_vtable, br_ghash_ctmul, br_md5_ID, br_sha512_ID,
@@ -21,13 +21,14 @@ use crate::rsa::{
     BR_HASH_OID_SHA384, BR_HASH_OID_SHA512,
 };
 use crate::ssl::{
-    br_tls10_prf, br_tls12_sha256_prf, br_tls12_sha384_prf, br_tls_prf_impl, BR_AUTH_RSA,
+    br_tls10_prf, br_tls12_sha256_prf, br_tls12_sha384_prf, br_tls_prf_impl, BR_AUTH_ECDSA,
+    BR_AUTH_RSA,
 };
 use crate::symcipher::{
     br_aes_ct_cbcdec_vtable, br_aes_ct_cbcenc_vtable, br_aes_ct_ctr_vtable, br_aes_ct_ctrcbc_vtable,
     br_chacha20_ct_run, br_des_ct_cbcdec_vtable, br_des_ct_cbcenc_vtable, br_poly1305_ctmul_run,
 };
-use crate::x509::{br_x509_minimal_init, br_x509_trust_anchor, X509Engine};
+use crate::x509::{br_x509_minimal_init_full, br_x509_trust_anchor, X509Engine};
 
 use super::ssl_engine::*;
 
@@ -184,10 +185,9 @@ impl br_ssl_client_context {
         let mut cc = Self::zero();
         cc.eng.set_versions(BR_TLS10, BR_TLS12);
 
-        // X.509 minimal engine (uses SHA-256 to hash DNs).
-        let mut xc = br_x509_minimal_init(&br_sha256_vtable, trust_anchors);
-        xc.set_rsa(br_rsa_pkcs1_vrfy_get_default());
-        xc.set_ecdsa(br_ec_get_default(), br_ecdsa_i31_vrfy_asn1);
+        // X.509 minimal engine: SHA-256 DN hashing, i31 RSA+ECDSA verifiers and
+        // all six hashes (`br_x509_minimal_init_full`).
+        let mut xc = br_x509_minimal_init_full(trust_anchors);
         // Validation time: upstream `br_ssl_client_init_full` leaves the X.509
         // engine to use the OS clock. We have no portable clock dependency, so
         // set a fixed sane time. Callers needing real time should build the
@@ -198,7 +198,8 @@ impl br_ssl_client_context {
         cc.eng.set_default_rsavrfy();
         cc.eng.set_default_ecdsa();
 
-        // Activate all hash functions in both engines.
+        // Activate all hash functions in the engine (the multi-hasher used for
+        // the handshake transcript + PRF seeds).
         let hashes: [&'static crate::hash::br_hash_class; 6] = [
             &br_md5_vtable,
             &br_sha1_vtable,
@@ -208,9 +209,7 @@ impl br_ssl_client_context {
             &br_sha512_vtable,
         ];
         for id in (br_md5_ID as i32)..=(br_sha512_ID as i32) {
-            let hc = hashes[(id - 1) as usize];
-            cc.eng.set_hash(id, Some(hc));
-            xc.set_hash(id, Some(hc));
+            cc.eng.set_hash(id, Some(hashes[(id - 1) as usize]));
         }
 
         cc.eng.set_x509(Box::new(xc));
@@ -271,6 +270,30 @@ impl br_ssl_client_context {
             chain,
             sk,
             irsasign: br_rsa_pkcs1_sign_get_default(),
+        };
+        self.eng.client_auth = Some(Box::new(policy));
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_client_set_single_ec`).
+    ///
+    /// Install a single-certificate EC client-auth handler for the
+    /// signature-based (ECDHE_ECDSA) case: the client presents `chain` and signs
+    /// the CertificateVerify with the EC private key (`curve`, `sk` scalar).
+    /// `allowed_usages` should include `BR_KEYTYPE_SIGN`. The static-ECDH client
+    /// auth case (`BR_AUTH_ECDH`) is not handled (documented in `mod.rs`).
+    pub fn set_single_ec(
+        &mut self,
+        chain: Vec<Vec<u8>>,
+        curve: i32,
+        sk: Vec<u8>,
+        allowed_usages: u32,
+    ) {
+        let policy = SingleEcClientCert {
+            chain,
+            curve,
+            sk,
+            allowed_usages,
+            isign: br_ecdsa_i31_sign_asn1,
         };
         self.eng.client_auth = Some(Box::new(policy));
     }
@@ -336,5 +359,61 @@ impl ClientCertPolicy for SingleRsaClientCert {
         } else {
             0
         }
+    }
+}
+
+/// Single-EC-certificate client-auth policy
+/// (`br_ssl_client_certificate_ec_context`), signature (ECDSA) path.
+struct SingleEcClientCert {
+    chain: Vec<Vec<u8>>,
+    curve: i32,
+    sk: Vec<u8>,
+    allowed_usages: u32,
+    isign: crate::ec::br_ecdsa_sign,
+}
+
+impl ClientCertPolicy for SingleEcClientCert {
+    fn choose(&self, auth_types: u32) -> ClientCertChoices {
+        // `cc_choose` (signature branch): pick a hash for the ECDSA signature
+        // from the signature-hash byte (`auth_types >> 8`). The static-ECDH
+        // (BR_AUTH_ECDH) branch is not implemented here.
+        let x = br_ssl_choose_hash(auth_types >> 8);
+        let usable = x != 0 && (self.allowed_usages & super::ssl_server::BR_KEYTYPE_SIGN) != 0;
+        ClientCertChoices {
+            auth_type: if usable { BR_AUTH_ECDSA } else { 0 },
+            hash_id: x,
+            chain: if usable { self.chain.clone() } else { Vec::new() },
+        }
+    }
+
+    fn do_sign(&self, hash_id: i32, hv_len: usize, data: &mut [u8], len: usize) -> usize {
+        // `cc_do_sign`: ECDSA over the prepared hash value.
+        let hc = match hash_class_by_id(hash_id) {
+            Some(h) => h,
+            None => return 0,
+        };
+        let mut hv = [0u8; 64];
+        hv[..hv_len].copy_from_slice(&data[..hv_len]);
+        if len < 139 {
+            return 0;
+        }
+        let sk = crate::ec::br_ec_private_key {
+            curve: self.curve,
+            x: &self.sk,
+        };
+        (self.isign)(br_ec_get_default(), hc, &hv[..hv_len], &sk, &mut data[..len])
+    }
+}
+
+/// Resolve a hash vtable by its BearSSL hash id (1=MD5 .. 6=SHA-512).
+fn hash_class_by_id(id: i32) -> Option<&'static crate::hash::br_hash_class> {
+    match id {
+        x if x == br_md5_ID as i32 => Some(&br_md5_vtable),
+        2 => Some(&br_sha1_vtable),
+        3 => Some(&br_sha224_vtable),
+        4 => Some(&br_sha256_vtable),
+        5 => Some(&br_sha384_vtable),
+        x if x == br_sha512_ID as i32 => Some(&br_sha512_vtable),
+        _ => None,
     }
 }

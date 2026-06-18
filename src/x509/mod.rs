@@ -186,4 +186,6 @@ pub use x509_decoder::{
 pub use x509_knownkey::{
     br_x509_knownkey_context, br_x509_knownkey_init_ec, br_x509_knownkey_init_rsa,
 };
-pub use x509_minimal::{br_x509_minimal_context, br_x509_minimal_init};
+pub use x509_minimal::{
+    br_x509_minimal_context, br_x509_minimal_init, br_x509_minimal_init_full,
+};

@@ -13,7 +13,7 @@
 use crate::ec::{br_ec_get_default, br_ecdsa_i31_sign_asn1, br_ecdsa_sign};
 use crate::hash::{
     br_md5_vtable, br_sha1_vtable, br_sha224_vtable, br_sha256_vtable, br_sha384_vtable,
-    br_sha512_vtable, br_md5_ID, br_sha1_ID, br_sha512_ID,
+    br_sha512_vtable, br_md5_ID, br_sha1_ID, br_sha256_ID, br_sha512_ID,
 };
 use crate::rsa::{
     br_rsa_pkcs1_sign, br_rsa_pkcs1_sign_get_default, br_rsa_private, br_rsa_private_get_default,
@@ -37,6 +37,9 @@ pub const BR_SSLKEYX_ECDHE_RSA: u16 = 1;
 pub const BR_SSLKEYX_ECDHE_ECDSA: u16 = 2;
 pub const BR_SSLKEYX_ECDH_RSA: u16 = 3;
 pub const BR_SSLKEYX_ECDH_ECDSA: u16 = 4;
+
+/// Cipher-suite identifiers (shared with the client profile).
+use super::ssl_client::suites;
 
 /// The default server suite list (same record layers as the client).
 pub const SERVER_SUITES: [u16; 19] = crate::ssl::SUITES_SUPPORTED;
@@ -79,6 +82,46 @@ const HASH_OID: [&[u8]; 5] = [
     BR_HASH_OID_SHA384,
     BR_HASH_OID_SHA512,
 ];
+
+/// Build a boxed single-RSA server policy (`br_ssl_server_set_single_rsa`).
+fn single_rsa_policy(
+    chain: Vec<Vec<u8>>,
+    sk: RsaPrivateKeyParts,
+    allowed_usages: u32,
+) -> Box<dyn ServerPolicy> {
+    Box::new(SingleRsaPolicy {
+        chain,
+        sk: OwnedRsaKey {
+            n_bitlen: sk.n_bitlen,
+            p: sk.p,
+            q: sk.q,
+            dp: sk.dp,
+            dq: sk.dq,
+            iq: sk.iq,
+        },
+        allowed_usages,
+        irsacore: br_rsa_private_get_default(),
+        irsasign: br_rsa_pkcs1_sign_get_default(),
+    })
+}
+
+/// Build a boxed single-EC server policy (`br_ssl_server_set_single_ec`).
+fn single_ec_policy(
+    chain: Vec<Vec<u8>>,
+    curve: i32,
+    sk: Vec<u8>,
+    allowed_usages: u32,
+    cert_issuer_key_type: u32,
+) -> Box<dyn ServerPolicy> {
+    Box::new(SingleEcPolicy {
+        chain,
+        curve,
+        sk,
+        allowed_usages,
+        cert_issuer_key_type,
+        isign: br_ecdsa_i31_sign_asn1,
+    })
+}
 
 /// Single-RSA-certificate policy (`br_ssl_server_policy_rsa_context`): supports
 /// the RSA key-exchange and ECDHE_RSA (RSA-signed) cipher suites.
@@ -305,21 +348,8 @@ impl br_ssl_server_context {
         cc.eng.set_default_rsavrfy();
         cc.eng.set_default_ecdsa();
         cc.set_common_defaults();
-        let policy = SingleRsaPolicy {
-            chain,
-            sk: OwnedRsaKey {
-                n_bitlen: sk.n_bitlen,
-                p: sk.p,
-                q: sk.q,
-                dp: sk.dp,
-                dq: sk.dq,
-                iq: sk.iq,
-            },
-            allowed_usages: BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN,
-            irsacore: br_rsa_private_get_default(),
-            irsasign: br_rsa_pkcs1_sign_get_default(),
-        };
-        cc.eng.set_policy(Box::new(policy));
+        cc.eng
+            .set_policy(single_rsa_policy(chain, sk, BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN));
         cc
     }
 
@@ -340,15 +370,110 @@ impl br_ssl_server_context {
         cc.eng.set_default_rsavrfy();
         cc.eng.set_default_ecdsa();
         cc.set_common_defaults();
-        let policy = SingleEcPolicy {
+        cc.eng.set_policy(single_ec_policy(
             chain,
             curve,
             sk,
-            allowed_usages: BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN,
+            BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN,
             cert_issuer_key_type,
-            isign: br_ecdsa_i31_sign_asn1,
-        };
-        cc.eng.set_policy(Box::new(policy));
+        ));
+        cc
+    }
+
+    // ---- narrow single-suite profiles (`ssl_server_min*.c`) -----------------
+    //
+    // Each is TLS-1.2-only, one cipher suite, only the hashes that suite needs.
+    // Naming: `e`=ECDHE_RSA, `f`=ECDHE_ECDSA, `r`=RSA-keyx, `u`=ECDH_RSA,
+    // `v`=ECDH_ECDSA; `2g`=AES-128-GCM, `2c`=ChaCha20-Poly1305.
+
+    fn min_common(cc: &mut Self, suites: &[u16]) {
+        cc.eng.set_versions(BR_TLS12, BR_TLS12);
+        cc.eng.set_suites(suites);
+        cc.eng.set_default_ec();
+        cc.eng.set_hash(br_sha256_ID as i32, Some(&br_sha256_vtable));
+        cc.eng.set_prf_sha256(br_tls12_sha256_prf);
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_mine2g`): ECDHE_RSA + AES-128-GCM.
+    pub fn init_mine2g(chain: Vec<Vec<u8>>, sk: RsaPrivateKeyParts) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        cc.eng.set_default_aes_gcm();
+        cc.eng
+            .set_policy(single_rsa_policy(chain, sk, BR_KEYTYPE_SIGN));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_mine2c`): ECDHE_RSA + ChaCha20.
+    pub fn init_mine2c(chain: Vec<Vec<u8>>, sk: RsaPrivateKeyParts) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256]);
+        cc.eng.set_default_chapol();
+        cc.eng
+            .set_policy(single_rsa_policy(chain, sk, BR_KEYTYPE_SIGN));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_minf2g`): ECDHE_ECDSA + AES-128-GCM.
+    pub fn init_minf2g(chain: Vec<Vec<u8>>, curve: i32, sk: Vec<u8>) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
+        cc.eng.set_default_aes_gcm();
+        cc.eng
+            .set_policy(single_ec_policy(chain, curve, sk, BR_KEYTYPE_SIGN, 0));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_minf2c`): ECDHE_ECDSA + ChaCha20.
+    pub fn init_minf2c(chain: Vec<Vec<u8>>, curve: i32, sk: Vec<u8>) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256]);
+        cc.eng.set_default_chapol();
+        cc.eng
+            .set_policy(single_ec_policy(chain, curve, sk, BR_KEYTYPE_SIGN, 0));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_minr2g`): RSA key exchange +
+    /// AES-128-GCM.
+    pub fn init_minr2g(chain: Vec<Vec<u8>>, sk: RsaPrivateKeyParts) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::RSA_WITH_AES_128_GCM_SHA256]);
+        cc.eng.set_default_aes_gcm();
+        cc.eng
+            .set_policy(single_rsa_policy(chain, sk, BR_KEYTYPE_KEYX));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_minu2g`): static ECDH (RSA-signed
+    /// cert) + AES-128-GCM. `curve`/`sk` are the server's static EC key.
+    pub fn init_minu2g(chain: Vec<Vec<u8>>, curve: i32, sk: Vec<u8>) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDH_RSA_WITH_AES_128_GCM_SHA256]);
+        cc.eng.set_default_aes_gcm();
+        cc.eng.set_policy(single_ec_policy(
+            chain,
+            curve,
+            sk,
+            BR_KEYTYPE_KEYX,
+            BR_KEYTYPE_RSA,
+        ));
+        cc
+    }
+
+    /// see bearssl_ssl.h (`br_ssl_server_init_minv2g`): static ECDH
+    /// (ECDSA-signed cert) + AES-128-GCM.
+    pub fn init_minv2g(chain: Vec<Vec<u8>>, curve: i32, sk: Vec<u8>) -> Self {
+        let mut cc = Self::zero();
+        Self::min_common(&mut cc, &[suites::ECDH_ECDSA_WITH_AES_128_GCM_SHA256]);
+        cc.eng.set_default_aes_gcm();
+        cc.eng.set_policy(single_ec_policy(
+            chain,
+            curve,
+            sk,
+            BR_KEYTYPE_KEYX,
+            BR_KEYTYPE_EC,
+        ));
         cc
     }
 
