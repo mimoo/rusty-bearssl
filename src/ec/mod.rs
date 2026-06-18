@@ -156,6 +156,7 @@ mod ecdsa_i31_vrfy_raw;
 mod ecdsa_rta;
 
 mod ec_default;
+mod ec_keygen;
 mod ec_pubkey;
 
 // ---- re-exports -------------------------------------------------------------
@@ -170,6 +171,7 @@ pub use ec_p256_m31::br_ec_p256_m31;
 pub use ec_c25519_i31::br_ec_c25519_i31;
 
 pub use ec_default::{br_ec_all_m31, br_ec_get_default};
+pub use ec_keygen::br_ec_keygen;
 pub use ec_pubkey::br_ec_compute_pub;
 
 pub use ecdsa_atr::br_ecdsa_asn1_to_raw;

@@ -376,3 +376,64 @@ fn compute_pub_p256() {
         assert_eq!(&kbuf[..65], &EC_P256_PUB_POINT[..], "computed pub mismatch");
     }
 }
+
+// --- key generation: seeded keygen -> derive pub -> ECDSA round-trip. --------
+
+#[test]
+fn keygen_p256_roundtrip() {
+    use bearssl::ec::{br_ec_keygen, BR_EC_KBUF_PRIV_MAX_SIZE};
+    use bearssl::rand::br_hmac_drbg_context;
+
+    let seed = b"bearssl-rs ec keygen test seed 0123456789";
+    let imp = &br_ec_prime_i31;
+
+    let mut rng = br_hmac_drbg_context::new(&br_sha256_vtable, seed);
+    let mut kbuf = [0u8; BR_EC_KBUF_PRIV_MAX_SIZE];
+    let xlen = br_ec_keygen(&mut rng, imp, Some(&mut kbuf), BR_EC_secp256r1);
+    assert_eq!(xlen, 32, "P-256 private scalar length");
+
+    // The scalar must be in [1, n-1]: non-zero, and strictly below the order.
+    let order = (imp.order)(BR_EC_secp256r1);
+    assert!(kbuf[..xlen].iter().any(|&b| b != 0), "scalar is zero");
+    assert!(kbuf[..xlen] < order[..xlen], "scalar >= order");
+
+    let sk = br_ec_private_key {
+        curve: BR_EC_secp256r1,
+        x: &kbuf[..xlen],
+    };
+
+    // Derive the public key; this also fails if the scalar is out of range.
+    let mut pbuf = [0u8; BR_EC_KBUF_PUB_MAX_SIZE];
+    let plen = br_ec_compute_pub(imp, Some(&mut pbuf), &sk);
+    assert_eq!(plen, 65, "P-256 public point length");
+    // Uncompressed-point marker; confirms a well-formed point was produced.
+    assert_eq!(pbuf[0], 0x04, "public point not uncompressed form");
+
+    let pk = br_ec_public_key {
+        curve: BR_EC_secp256r1,
+        q: &pbuf[..plen],
+    };
+
+    // ECDSA sign/verify round-trip with the generated key.
+    let hash = hash_msg(&br_sha256_vtable, b"message to be signed");
+    let mut sig = [0u8; 150];
+    let n = br_ecdsa_i31_sign_raw(imp, &br_sha256_vtable, &hash, &sk, &mut sig);
+    assert!(n > 0, "sign failed");
+    assert_eq!(
+        br_ecdsa_i31_vrfy_raw(imp, &hash, &pk, &sig[..n]),
+        1,
+        "verify with generated key failed"
+    );
+
+    // A tampered hash must be rejected.
+    let mut bad = hash.clone();
+    bad[0] ^= 0x80;
+    assert_eq!(br_ecdsa_i31_vrfy_raw(imp, &bad, &pk, &sig[..n]), 0);
+
+    // Determinism: the same seed must yield the same key.
+    let mut rng2 = br_hmac_drbg_context::new(&br_sha256_vtable, seed);
+    let mut kbuf2 = [0u8; BR_EC_KBUF_PRIV_MAX_SIZE];
+    let xlen2 = br_ec_keygen(&mut rng2, imp, Some(&mut kbuf2), BR_EC_secp256r1);
+    assert_eq!(xlen, xlen2);
+    assert_eq!(kbuf[..xlen], kbuf2[..xlen2], "keygen not deterministic for fixed seed");
+}
