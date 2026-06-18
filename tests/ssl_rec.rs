@@ -90,6 +90,99 @@ fn gcm_sequence_numbers_advance() {
     }
 }
 
+// ---- CBC record layer (HMAC-SHA1, AES-128, explicit IV) ---------------------
+
+use bearssl::hash::br_sha1_vtable;
+use bearssl::symcipher::{br_aes_ct_cbcdec_vtable, br_aes_ct_cbcenc_vtable};
+
+const CBC_MAC_KEY: [u8; 20] = [
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x20, 0x21, 0x22, 0x23,
+];
+
+#[test]
+fn cbc_record_roundtrip_explicit_iv() {
+    // TLS 1.2 (explicit IV) CBC roundtrip with AES-128 + HMAC-SHA1 (mac_len 20).
+    // Use the HANDSHAKE record type so no TLS 1.0 1/n-1 split applies.
+    let blen = 16usize;
+    let mac_len = 20usize;
+    let pt = b"a CBC-mode TLS record payload";
+    let len = pt.len();
+
+    // Layout (explicit IV): [5 hdr][blen IV][plaintext][mac_len MAC][padding].
+    // Padding can be up to blen bytes. Reserve generously and place plaintext at
+    // po so that header (5) + IV (blen) fit before it.
+    let po = 5 + blen;
+    let mut buf = vec![0u8; po + len + mac_len + 2 * blen + 8];
+    buf[po..po + len].copy_from_slice(pt);
+
+    let mut out = br_sslrec_out_cbc_init(
+        &br_aes_ct_cbcenc_vtable,
+        &KEY,
+        &br_sha1_vtable,
+        &CBC_MAC_KEY,
+        mac_len,
+        None, // explicit IV
+    );
+    let (off, total) = cbc_encrypt(&mut out, 22, 0x0303, &mut buf, po, len);
+    assert_eq!(buf[off], 22, "record type");
+    assert_eq!(&buf[off + 1..off + 3], &[0x03, 0x03], "version");
+    let rec_len = ((buf[off + 3] as usize) << 8) | buf[off + 4] as usize;
+    // Body = IV + plaintext + MAC + padding, multiple of the block size.
+    assert_eq!(rec_len % blen, 0, "record body multiple of block size");
+    assert_eq!(total, 5 + rec_len);
+
+    // Decrypt with a fresh context (explicit IV mode).
+    let mut payload = buf[off + 5..off + total].to_vec();
+    let mut inc = br_sslrec_in_cbc_init(
+        &br_aes_ct_cbcdec_vtable,
+        &KEY,
+        &br_sha1_vtable,
+        &CBC_MAC_KEY,
+        mac_len,
+        None,
+    );
+    assert!(cbc_check_length(&inc, payload.len()), "check_length");
+    let (poff, plen) = cbc_decrypt(&mut inc, 22, 0x0303, &mut payload).expect("MAC verify");
+    assert_eq!(plen, len);
+    assert_eq!(&payload[poff..poff + plen], &pt[..], "recovered plaintext");
+}
+
+#[test]
+fn cbc_record_tamper_rejected() {
+    let blen = 16usize;
+    let mac_len = 20usize;
+    let pt = b"do not tamper";
+    let len = pt.len();
+    let po = 5 + blen;
+    let mut buf = vec![0u8; po + len + mac_len + 2 * blen + 8];
+    buf[po..po + len].copy_from_slice(pt);
+    let mut out = br_sslrec_out_cbc_init(
+        &br_aes_ct_cbcenc_vtable,
+        &KEY,
+        &br_sha1_vtable,
+        &CBC_MAC_KEY,
+        mac_len,
+        None,
+    );
+    let (off, total) = cbc_encrypt(&mut out, 22, 0x0303, &mut buf, po, len);
+    let mut payload = buf[off + 5..off + total].to_vec();
+    // Flip a byte in the ciphertext body (after the explicit-IV block).
+    payload[blen + 1] ^= 0x01;
+    let mut inc = br_sslrec_in_cbc_init(
+        &br_aes_ct_cbcdec_vtable,
+        &KEY,
+        &br_sha1_vtable,
+        &CBC_MAC_KEY,
+        mac_len,
+        None,
+    );
+    assert!(
+        cbc_decrypt(&mut inc, 22, 0x0303, &mut payload).is_none(),
+        "tampered CBC record must be rejected"
+    );
+}
+
 // ---- ChaCha20-Poly1305 record layer ----------------------------------------
 
 use bearssl::symcipher::{br_chacha20_ct_run, br_poly1305_ctmul_run};

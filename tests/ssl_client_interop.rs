@@ -112,22 +112,104 @@ fn rust_client_vs_brssl_server_rsa() {
 
     // Force the RSA-with-AES-128-GCM suite (we want a deterministic, supported
     // key exchange) using TLS 1.2 only.
-    let mut child = Command::new(&brssl)
+    run_client_vs_brssl(&brssl, &chain_path, &key, port, "ECDHE_RSA_WITH_AES_128_GCM_SHA256");
+}
+
+#[test]
+fn rust_client_vs_brssl_server_chapol() {
+    let dir = match brssl_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("skipping: brssl build not found (set BRSSL_DIR)");
+            return;
+        }
+    };
+    let brssl = dir.join("build/brssl");
+    let cert = dir.join("samples/cert-ee-rsa.pem");
+    let key = dir.join("samples/key-ee-rsa.pem");
+    let ica = dir.join("samples/cert-ica-rsa.pem");
+    if !cert.exists() || !key.exists() {
+        eprintln!("skipping: sample certs not found");
+        return;
+    }
+    let chain_path = std::env::temp_dir().join("bearssl_rs_chain_cp.pem");
+    {
+        let mut c = std::fs::read(&cert).unwrap();
+        if let Ok(mut i) = std::fs::read(&ica) {
+            c.append(&mut i);
+        }
+        std::fs::write(&chain_path, &c).unwrap();
+    }
+    let port = {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    run_client_vs_brssl(
+        &brssl,
+        &chain_path,
+        &key,
+        port,
+        "ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    );
+}
+
+/// Spawn `brssl server` on `port` with the given suite, feeding it a line on
+/// stdin (which it relays to the client) and capturing its stderr. Returns the
+/// connected `TcpStream`, the shared stderr buffer, and the process guard.
+fn spawn_brssl_server(
+    brssl: &std::path::Path,
+    chain_path: &std::path::Path,
+    key: &std::path::Path,
+    port: u16,
+    cs: &str,
+) -> (TcpStream, std::sync::Arc<std::sync::Mutex<Vec<u8>>>, ServerGuard) {
+    // Force a single TLS 1.2 suite for a deterministic handshake. We do NOT pass
+    // `-q`, and we capture stderr so a failed handshake prints brssl's own abort
+    // reason / alert.
+    let mut child = Command::new(brssl)
         .arg("server")
         .args(["-p", &port.to_string()])
         .args(["-cert", chain_path.to_str().unwrap()])
         .args(["-key", key.to_str().unwrap()])
         .args(["-vmin", "tls1.2", "-vmax", "tls1.2"])
-        .args(["-cs", "ECDHE_RSA_WITH_AES_128_GCM_SHA256"])
-        .arg("-q")
+        .args(["-cs", cs])
+        .args(["-trace"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn brssl server");
-    // Keep stdin open so the server does not get EOF immediately.
-    let _server_stdin = child.stdin.take();
-    let _guard = ServerGuard(child);
+    // Feed the server a line on stdin: the brssl `server` command relays its
+    // stdin to the connected client as application data, so this is what our
+    // client will read back after sending its request.
+    if let Some(mut si) = child.stdin.take() {
+        std::thread::spawn(move || {
+            // Small delay so the line is sent only once a peer is connected.
+            std::thread::sleep(Duration::from_millis(600));
+            let _ = si.write_all(b"hello from brssl server\n");
+            let _ = si.flush();
+            // Keep the handle alive so stdin is not closed (which would make the
+            // server tear down the connection).
+            std::thread::sleep(Duration::from_secs(8));
+            drop(si);
+        });
+    }
+    // Drain brssl's stderr on a background thread into a shared buffer so we can
+    // print it on failure (brssl logs the exact alert / abort reason there).
+    let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    if let Some(mut se) = child.stderr.take() {
+        let buf = stderr_buf.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 1024];
+            loop {
+                match se.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buf.lock().unwrap().extend_from_slice(&chunk[..n]),
+                }
+            }
+        });
+    }
+    let guard = ServerGuard(child);
 
     // Give the server a moment to bind.
     std::thread::sleep(Duration::from_millis(300));
@@ -135,6 +217,11 @@ fn rust_client_vs_brssl_server_rsa() {
     let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+    (stream, stderr_buf, guard)
+}
+
+fn run_client_vs_brssl(brssl: &std::path::Path, chain_path: &std::path::Path, key: &std::path::Path, port: u16, cs: &str) {
+    let (stream, stderr_buf, _guard) = spawn_brssl_server(brssl, chain_path, key, port, cs);
 
     let mut cc = br_ssl_client_context::init_full(trust_anchors());
     assert!(cc.reset(Some("localhost"), false), "client reset failed");
@@ -144,13 +231,112 @@ fn rust_client_vs_brssl_server_rsa() {
     let mut got_appdata = Vec::new();
 
     let result = drive(&mut cc.eng, stream, request, &mut sent_request, &mut got_appdata);
+    let brssl_err = String::from_utf8_lossy(&stderr_buf.lock().unwrap()).into_owned();
     match result {
         Ok(()) => {
             assert!(sent_request, "never reached the point of sending app data");
-            // We expect some response bytes (the brssl server echoes a basic page).
+            assert!(
+                !got_appdata.is_empty(),
+                "no application data received from server"
+            );
         }
-        Err(e) => panic!("handshake/exchange failed: {} (err={})", e, cc.eng.last_error()),
+        Err(e) => panic!(
+            "handshake/exchange failed: {} (err={})\n--- brssl stderr ---\n{}",
+            e,
+            cc.eng.last_error(),
+            brssl_err
+        ),
     }
+}
+
+/// Same handshake + exchange, but driven through the `br_sslio_context`
+/// blocking I/O convenience wrapper (the port of `ssl_io.c`) instead of the
+/// hand-rolled `drive` state pump.
+#[test]
+fn rust_client_sslio_vs_brssl_server_rsa() {
+    let dir = match brssl_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("skipping: brssl build not found (set BRSSL_DIR)");
+            return;
+        }
+    };
+    let brssl = dir.join("build/brssl");
+    let cert = dir.join("samples/cert-ee-rsa.pem");
+    let key = dir.join("samples/key-ee-rsa.pem");
+    let ica = dir.join("samples/cert-ica-rsa.pem");
+    if !cert.exists() || !key.exists() {
+        eprintln!("skipping: sample certs not found");
+        return;
+    }
+    let chain_path = std::env::temp_dir().join("bearssl_rs_chain_io.pem");
+    {
+        let mut c = std::fs::read(&cert).unwrap();
+        if let Ok(mut i) = std::fs::read(&ica) {
+            c.append(&mut i);
+        }
+        std::fs::write(&chain_path, &c).unwrap();
+    }
+    let port = {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let (stream, stderr_buf, _guard) =
+        spawn_brssl_server(&brssl, &chain_path, &key, port, "ECDHE_RSA_WITH_AES_128_GCM_SHA256");
+
+    let mut cc = br_ssl_client_context::init_full(trust_anchors());
+    assert!(cc.reset(Some("localhost"), false), "client reset failed");
+
+    // The transport closures bridge the engine to the TcpStream. They follow the
+    // C `low_read`/`low_write` convention: return the byte count, or `< 0` on a
+    // hard error (a timeout is treated as a fatal error so the test cannot hang).
+    let read_stream = stream.try_clone().unwrap();
+    let write_stream = stream;
+    let low_read = {
+        let mut s = read_stream;
+        Box::new(move |buf: &mut [u8]| -> LowResult {
+            match s.read(buf) {
+                Ok(0) => -1,
+                Ok(n) => n as i32,
+                Err(_) => -1,
+            }
+        }) as Box<LowRead>
+    };
+    let low_write = {
+        let mut s = write_stream;
+        Box::new(move |buf: &[u8]| -> LowResult {
+            match s.write(buf) {
+                Ok(0) => -1,
+                Ok(n) => n as i32,
+                Err(_) => -1,
+            }
+        }) as Box<LowWrite>
+    };
+
+    let request = b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n";
+    let mut got = [0u8; 256];
+    let (wres, rlen) = {
+        let mut io = br_sslio_context::new(&mut cc.eng, low_read, low_write);
+        let wres = io.write_all(request);
+        let _ = io.flush();
+        // Read back the server's relayed line.
+        let rlen = io.read(&mut got);
+        (wres, rlen)
+    };
+    let brssl_err = String::from_utf8_lossy(&stderr_buf.lock().unwrap()).into_owned();
+    assert!(
+        wres == 0,
+        "sslio write_all failed (err={})\n--- brssl stderr ---\n{}",
+        cc.eng.last_error(),
+        brssl_err
+    );
+    assert!(
+        rlen > 0,
+        "sslio read returned {} (err={})\n--- brssl stderr ---\n{}",
+        rlen,
+        cc.eng.last_error(),
+        brssl_err
+    );
 }
 
 /// Pump the engine state machine over a TCP stream.
@@ -163,12 +349,20 @@ fn drive(
 ) -> Result<(), String> {
     let mut rxbuf = [0u8; 4096];
     let mut loops = 0;
+    // Set once we have a full exchange (request sent + response received) and
+    // have asked the engine to close: at that point we flush our own
+    // close_notify but do not block waiting for the peer's, since RFC 5246
+    // allows the peer to drop the connection without waiting for it.
+    let mut closing = false;
     loop {
         loops += 1;
         if loops > 100000 {
             return Err("too many iterations".into());
         }
         let st = eng.current_state();
+        if std::env::var("DRIVE_TRACE").is_ok() {
+            eprintln!("[drive] loop={} state={:#x} sent={} got={}", loops, st, sent_request, got_appdata.len());
+        }
         if st & BR_SSL_CLOSED != 0 {
             if eng.last_error() == 0 {
                 return Ok(());
@@ -202,15 +396,27 @@ fn drive(
             let n = eng.recvapp(&mut tmp);
             if n > 0 {
                 got_appdata.extend_from_slice(&tmp[..n]);
-                // Once we received a response after sending the request, succeed.
-                if *sent_request && got_appdata.len() >= 1 {
+                // Once we received a response after sending the request, the
+                // exchange is complete: initiate a clean close.
+                if *sent_request && !got_appdata.is_empty() {
                     eng.close();
+                    closing = true;
                 }
                 continue;
             }
         }
 
-        // 4. Feed transport bytes from the socket into the engine.
+        // If we have initiated a clean close and there are no more records to
+        // send (our close_notify is on the wire), the exchange succeeded; do
+        // not block waiting for the peer's close_notify.
+        if closing && st & BR_SSL_SENDREC == 0 {
+            return Ok(());
+        }
+
+        // 4. Feed transport bytes from the socket into the engine. A blocking
+        // read with a timeout: any real timeout / EOF is a hard failure (the
+        // engine is genuinely waiting on the peer, so there is nothing else to
+        // do), which keeps `cargo test` from hanging.
         if st & BR_SSL_RECVREC != 0 {
             match stream.read(&mut rxbuf) {
                 Ok(0) => return Err("peer closed before completion".into()),
@@ -229,17 +435,13 @@ fn drive(
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut =>
                 {
-                    // No transport data yet; the engine is simply waiting for
-                    // the peer's next flight. Spin and retry rather than fail.
-                    continue;
+                    return Err("timed out waiting for peer record".into());
                 }
                 Err(e) => return Err(format!("socket read: {}", e)),
             }
         }
 
-        // Nothing actionable; small spin guard.
-        if st == 0 {
-            return Err("engine wedged (state 0)".into());
-        }
+        // Nothing actionable; the engine produced no work and wants no input.
+        return Err(format!("engine wedged (state {:#x})", st));
     }
 }

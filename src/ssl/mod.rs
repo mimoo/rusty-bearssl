@@ -30,6 +30,8 @@ mod ssl_client;
 mod ssl_engine;
 mod ssl_hs_client;
 mod ssl_hs_server;
+mod ssl_io;
+mod ssl_rec_cbc;
 mod ssl_rec_chapol;
 mod ssl_rec_gcm;
 
@@ -38,6 +40,12 @@ pub use ssl_engine::{
     br_ssl_choose_hash, br_ssl_engine_context, BR_ERR_BAD_HANDSHAKE, BR_ERR_BAD_MAC, BR_ERR_OK,
     BR_SSL_APPLICATION_DATA, BR_SSL_CLOSED, BR_SSL_RECVAPP, BR_SSL_RECVREC, BR_SSL_SENDAPP,
     BR_SSL_SENDREC, BR_TLS10, BR_TLS11, BR_TLS12,
+};
+
+pub use ssl_io::{br_sslio_context, LowRead, LowResult, LowWrite};
+pub use ssl_rec_cbc::{
+    br_sslrec_in_cbc_context, br_sslrec_in_cbc_init, br_sslrec_out_cbc_context,
+    br_sslrec_out_cbc_init, cbc_check_length, cbc_decrypt, cbc_encrypt, cbc_max_plaintext,
 };
 
 pub use prf::br_tls_phash;
