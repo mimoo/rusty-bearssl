@@ -9,7 +9,7 @@
 //! the 64-bit sequence number XORed into its low 8 bytes.
 
 use crate::inner::{br_enc16be, br_enc64be};
-use crate::symcipher::{br_chacha20_run, br_poly1305_ctmul_run};
+use crate::symcipher::br_chacha20_run;
 
 /// A Poly1305-with-ChaCha20 AEAD run function (`br_poly1305_run`).
 pub type br_poly1305_run =

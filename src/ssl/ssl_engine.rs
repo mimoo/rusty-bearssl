@@ -21,11 +21,11 @@
 //! This mirrors the approach used by `src/x509/x509_minimal.rs`.
 
 use crate::hash::{
-    br_ghash, br_md5_ID, br_multihash_context, br_multihash_getimpl, br_multihash_init,
+    br_ghash, br_multihash_context, br_multihash_getimpl,
     br_sha1_ID, br_sha256_ID, br_sha384_ID,
 };
 use crate::inner::{br_dec16be, br_enc16be};
-use crate::rand::{br_hmac_drbg_context, br_hmac_drbg_init, br_hmac_drbg_update};
+use crate::rand::{br_hmac_drbg_context, br_hmac_drbg_update};
 use crate::ssl::{
     br_sslrec_chapol_context, br_sslrec_gcm_context, br_tls_prf_impl, br_tls_prf_seed_chunk,
     chapol_check_length, chapol_decrypt, chapol_encrypt, chapol_max_plaintext, gcm_check_length,
@@ -397,7 +397,11 @@ impl br_ssl_engine_context {
         self.ibuf.len()
     }
     pub(super) fn obuf_len(&self) -> usize {
-        self.obuf.len()
+        if self.shared_io {
+            self.ibuf.len()
+        } else {
+            self.obuf.len()
+        }
     }
 
     /// see inner.h (`br_ssl_engine_fail`)

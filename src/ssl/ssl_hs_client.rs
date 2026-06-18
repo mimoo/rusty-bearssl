@@ -56,7 +56,8 @@ fn t0_parse7E_signed(code: &[u8], ip: &mut usize) -> i32 {
         x = (x << 7) | (y & 0x7F) as u32;
         if y < 0x80 {
             if neg != 0 {
-                return !(x as i32);
+                // C: return -(int32_t)~x - 1;
+                return (!x as i32).wrapping_neg().wrapping_sub(1);
             } else {
                 return x as i32;
             }
@@ -123,8 +124,18 @@ macro_rules! local {
 /// see inner.h (`br_ssl_hs_client_run`)
 pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
     'next: loop {
+        let trace_ip = eng.ip;
         let t0x = T0_CODEBLOCK[eng.ip] as u32;
         eng.ip += 1;
+        if std::env::var("T0_TRACEALL").is_ok() && (694..730).contains(&trace_ip) {
+            eprintln!(
+                "[ip {}] op {} dp={} top={:#x}",
+                trace_ip,
+                t0x,
+                eng.dp,
+                if eng.dp > 0 { eng.dp_stack[eng.dp - 1] } else { 0 }
+            );
+        }
         if t0x < T0_INTERPRETED {
             match t0x {
                 0 => {
@@ -145,11 +156,17 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                 2 => {
                     let x = t0_parse7E_unsigned(&T0_CODEBLOCK, &mut eng.ip) as usize;
                     let v = local!(eng, x);
+                    if std::env::var("T0_TRACE2").is_ok() {
+                        eprintln!("[t0] local{} -> {:#x} (rp={})", x, v, eng.rp);
+                    }
                     push!(eng, v);
                 }
                 3 => {
                     let x = t0_parse7E_unsigned(&T0_CODEBLOCK, &mut eng.ip) as usize;
                     let v = pop!(eng);
+                    if std::env::var("T0_TRACE").is_ok() {
+                        eprintln!("[t0] >local{} = {:#x} (rp={})", x, v, eng.rp);
+                    }
                     local!(eng, x) = v;
                 }
                 4 => {
@@ -235,6 +252,9 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                 23 => {
                     let b = pop!(eng);
                     let a = pop!(eng);
+                    if std::env::var("T0_TRACE3").is_ok() {
+                        eprintln!("[t0] and {:#x} & {:#x}", a, b);
+                    }
                     push!(eng, a & b);
                 }
                 24 => {
@@ -448,6 +468,9 @@ pub(crate) fn br_ssl_hs_client_run(eng: &mut br_ssl_engine_context) {
                 }
                 64 => {
                     let x = eng.iec.map(|c| c.supported_curves).unwrap_or(0);
+                    if std::env::var("T0_TRACE").is_ok() {
+                        eprintln!("[t0] supported-curves -> {:#x}", x);
+                    }
                     push!(eng, x);
                 }
                 65 => {

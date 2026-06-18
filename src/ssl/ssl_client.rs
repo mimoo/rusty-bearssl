@@ -52,6 +52,11 @@ pub const SUITES_SUPPORTED: [u16; 10] = [
     suites::RSA_WITH_AES_256_GCM_SHA384,
 ];
 
+/// Default X.509 validation date used by [`br_ssl_client_context::init_full`]
+/// (days since 0000-01-01, proleptic Gregorian; ~2021, inside the BearSSL
+/// sample certificates' validity window).
+pub const DEFAULT_VALID_DAYS: u32 = 737956;
+
 /// TLS client context (`br_ssl_client_context`). Wraps the engine.
 pub struct br_ssl_client_context {
     pub eng: br_ssl_engine_context,
@@ -137,6 +142,11 @@ impl br_ssl_client_context {
         let mut xc = br_x509_minimal_init(&br_sha256_vtable, trust_anchors);
         xc.set_rsa(br_rsa_pkcs1_vrfy_get_default());
         xc.set_ecdsa(br_ec_get_default(), br_ecdsa_i31_vrfy_asn1);
+        // Validation time: upstream `br_ssl_client_init_full` leaves the X.509
+        // engine to use the OS clock. We have no portable clock dependency, so
+        // set a fixed sane time. Callers needing real time should build the
+        // X.509 engine themselves and pass it via `init_full_x509`.
+        xc.set_time(DEFAULT_VALID_DAYS, 0);
 
         cc.eng.set_suites(&SUITES_SUPPORTED);
         cc.eng.set_default_rsavrfy();

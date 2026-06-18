@@ -6,7 +6,7 @@
 
 use crate::hash::{br_digest_size, br_hash_class};
 use crate::mac::{
-    br_hmac_context, br_hmac_get_digest, br_hmac_init, br_hmac_key_context, br_hmac_key_init,
+    br_hmac_context, br_hmac_get_digest, br_hmac_key_context, br_hmac_key_init,
     br_hmac_out, br_hmac_size, br_hmac_update,
 };
 

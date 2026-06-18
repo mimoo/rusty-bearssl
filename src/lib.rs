@@ -18,6 +18,9 @@
 // width-preserving in Rust; keeping them aids line-by-line review.
 #![allow(clippy::unnecessary_cast)]
 #![allow(dead_code)]
+// Some ported routines declare working buffers (mirroring C `mem`/stack arrays)
+// whose initial value is overwritten before use — a faithful-port artifact.
+#![allow(unused_assignments)]
 
 pub mod inner;
 

@@ -19,7 +19,7 @@ impl br_ssl_engine_context {
     /// `make_ready_out`
     pub(super) fn make_ready_out(&mut self) {
         let mut a = 5usize;
-        let mut b = self.obuf.len() - a;
+        let mut b = self.obuf_len() - a;
         self.out_rec.max_plaintext(&mut a, &mut b);
         let mfl = self.max_frag_len();
         if (b - a) > mfl {
